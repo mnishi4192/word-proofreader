@@ -1,5 +1,5 @@
 /* =========================================================
-   文書校正アシスタント - taskpane.js
+   文書校正アシスタント - taskpane.js  v4
    ========================================================= */
 
 'use strict';
@@ -33,7 +33,8 @@ const SYSTEM_PROMPT = `このGPTは、編集者の視点から日本語文書を
 
 // ===== DOM 要素の取得 =====
 let apiKeyInput, modelSelect, saveSettingsBtn, settingsSavedMsg;
-let toggleKeyBtn, proofreadBtn, btnText, btnSpinner;
+let toggleKeyBtn, fetchModelsBtn, modelHint;
+let proofreadBtn, btnText, btnSpinner;
 let progressArea, progressText;
 let resultsSection, resultsMeta, resultsContent;
 let copyBtn, errorArea, errorMessage;
@@ -44,9 +45,8 @@ Office.onReady(function (info) {
     initDOM();
     loadSettings();
     bindEvents();
-    // APIキーが設定済みなら校正ボタンを有効化
     const savedKey = localStorage.getItem('proofreader_api_key');
-    if (savedKey && savedKey.trim().startsWith('sk-')) {
+    if (savedKey && savedKey.trim().length > 10) {
       proofreadBtn.disabled = false;
     }
   }
@@ -59,6 +59,8 @@ function initDOM() {
   saveSettingsBtn  = document.getElementById('save-settings');
   settingsSavedMsg = document.getElementById('settings-saved');
   toggleKeyBtn     = document.getElementById('toggle-key');
+  fetchModelsBtn   = document.getElementById('fetch-models-btn');
+  modelHint        = document.getElementById('model-hint');
   proofreadBtn     = document.getElementById('proofread-btn');
   btnText          = document.getElementById('btn-text');
   btnSpinner       = document.getElementById('btn-spinner');
@@ -77,7 +79,18 @@ function loadSettings() {
   const savedKey   = localStorage.getItem('proofreader_api_key') || '';
   const savedModel = localStorage.getItem('proofreader_model') || 'gpt-4o';
   apiKeyInput.value = savedKey;
-  modelSelect.value = savedModel;
+
+  // 保存済みモデルが選択肢にあればそれを選択、なければ追加して選択
+  const existingOption = Array.from(modelSelect.options).find(o => o.value === savedModel);
+  if (existingOption) {
+    modelSelect.value = savedModel;
+  } else if (savedModel) {
+    const opt = document.createElement('option');
+    opt.value = savedModel;
+    opt.textContent = savedModel + '（保存済み）';
+    modelSelect.appendChild(opt);
+    modelSelect.value = savedModel;
+  }
 }
 
 // ===== イベントバインド =====
@@ -95,15 +108,17 @@ function bindEvents() {
     localStorage.setItem('proofreader_model', model);
     settingsSavedMsg.style.display = 'inline';
     setTimeout(() => { settingsSavedMsg.style.display = 'none'; }, 2000);
-    // キーが有効そうなら校正ボタンを有効化
-    proofreadBtn.disabled = !(key && key.startsWith('sk-'));
+    proofreadBtn.disabled = !(key && key.length > 10);
   });
 
   // APIキー入力時にリアルタイムでボタン状態を更新
   apiKeyInput.addEventListener('input', function () {
     const key = apiKeyInput.value.trim();
-    proofreadBtn.disabled = !(key && key.startsWith('sk-'));
+    proofreadBtn.disabled = !(key && key.length > 10);
   });
+
+  // 利用可能なモデルを取得
+  fetchModelsBtn.addEventListener('click', fetchAvailableModels);
 
   // 校正実行
   proofreadBtn.addEventListener('click', runProofread);
@@ -118,13 +133,85 @@ function bindEvents() {
   });
 }
 
+// ===== 利用可能なモデルを API から取得 =====
+async function fetchAvailableModels() {
+  const apiKey = apiKeyInput.value.trim() || localStorage.getItem('proofreader_api_key') || '';
+  if (!apiKey || apiKey.length < 10) {
+    modelHint.textContent = '先に API キーを入力してください。';
+    modelHint.style.color = '#c0392b';
+    return;
+  }
+
+  fetchModelsBtn.disabled = true;
+  fetchModelsBtn.textContent = '…';
+  modelHint.textContent = 'モデルを取得中...';
+  modelHint.style.color = '#666';
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/models', {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error?.message || `HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    // GPT 系のチャットモデルのみ抽出してソート
+    const chatModels = data.data
+      .filter(m => m.id.startsWith('gpt-'))
+      .map(m => m.id)
+      .sort((a, b) => b.localeCompare(a));
+
+    if (chatModels.length === 0) {
+      throw new Error('利用可能な GPT モデルが見つかりませんでした。');
+    }
+
+    // 現在の選択値を保持
+    const currentValue = modelSelect.value;
+
+    // 選択肢を再構築
+    modelSelect.innerHTML = '';
+    const group = document.createElement('optgroup');
+    group.label = `利用可能なモデル（${chatModels.length} 件）`;
+    chatModels.forEach(id => {
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = id;
+      group.appendChild(opt);
+    });
+    modelSelect.appendChild(group);
+
+    // 以前の選択値を復元（なければ最初の項目）
+    if (chatModels.includes(currentValue)) {
+      modelSelect.value = currentValue;
+    } else {
+      // gpt-4o があれば優先、なければ先頭
+      const preferred = chatModels.find(m => m === 'gpt-4o') || chatModels[0];
+      modelSelect.value = preferred;
+    }
+
+    modelHint.textContent = `✓ ${chatModels.length} 件のモデルを取得しました。お使いのプロジェクトで利用可能なモデルが表示されています。`;
+    modelHint.style.color = '#27ae60';
+
+  } catch (err) {
+    modelHint.textContent = `取得失敗: ${err.message}`;
+    modelHint.style.color = '#c0392b';
+  } finally {
+    fetchModelsBtn.disabled = false;
+    fetchModelsBtn.textContent = '↻';
+  }
+}
+
 // ===== 校正実行メイン処理 =====
 async function runProofread() {
   const apiKey = localStorage.getItem('proofreader_api_key') || '';
-  const model  = localStorage.getItem('proofreader_model') || 'gpt-4o';
+  const model  = modelSelect.value || localStorage.getItem('proofreader_model') || 'gpt-4o';
 
-  if (!apiKey || !apiKey.startsWith('sk-')) {
-    showError('APIキーが設定されていません。上の「設定」欄にOpenAI APIキーを入力して保存してください。');
+  if (!apiKey || apiKey.length < 10) {
+    showError('API キーが設定されていません。上の「設定」欄に OpenAI API キーを入力して保存してください。');
     return;
   }
 
@@ -136,14 +223,14 @@ async function runProofread() {
   setProgress('文書のテキストを取得中...');
 
   try {
-    // Step 1: Word文書のテキストを取得
+    // Step 1: Word 文書のテキストを取得
     const documentText = await getDocumentText();
 
     if (!documentText || documentText.trim().length === 0) {
       throw new Error('文書にテキストが見つかりませんでした。文書にテキストを入力してから再試行してください。');
     }
 
-    setProgress('OpenAI APIに送信中...');
+    setProgress(`OpenAI API（${model}）に送信中...`);
 
     // Step 2: OpenAI API で校正
     const result = await callOpenAI(apiKey, model, documentText);
@@ -200,8 +287,8 @@ async function callOpenAI(apiKey, model, documentText) {
 
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
-    const errMsg = errData.error?.message || `HTTPエラー ${response.status}`;
-    throw new Error(`OpenAI APIエラー: ${errMsg}`);
+    const errMsg = errData.error?.message || `HTTP エラー ${response.status}`;
+    throw new Error(`OpenAI API エラー: ${errMsg}`);
   }
 
   const data = await response.json();
@@ -210,7 +297,6 @@ async function callOpenAI(apiKey, model, documentText) {
 
 // ===== 結果表示 =====
 function displayResults(rawText, documentText, model) {
-  // メタ情報
   const charCount = documentText.length;
   const lineCount = documentText.split('\n').length;
   const now = new Date().toLocaleString('ja-JP');
@@ -220,54 +306,43 @@ function displayResults(rawText, documentText, model) {
     `行数: <strong>${lineCount}</strong> 行 ／ ` +
     `実行日時: ${now}`;
 
-  // Markdown を HTML に変換して表示
   resultsContent.innerHTML = markdownToHTML(rawText);
-
   resultsSection.style.display = 'block';
-  // 結果セクションまでスクロール
   resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // ===== 簡易 Markdown → HTML 変換 =====
 function markdownToHTML(text) {
-  // 【修正前→修正後】パターンを赤字表示
   text = text.replace(/【(.+?)→(.+?)】/g,
     '<span class="correction">【<del>$1</del> → $2】</span>');
-
-  // 見出し
   text = text.replace(/^### (.+)$/gm, '<div class="section-header">$1</div>');
   text = text.replace(/^## (.+)$/gm,  '<div class="section-header" style="font-size:14px;margin-top:8px;">$1</div>');
   text = text.replace(/^# (.+)$/gm,   '<div class="section-header" style="font-size:15px;margin-top:8px;">$1</div>');
-
-  // 太字
   text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   text = text.replace(/__(.+?)__/g,     '<strong>$1</strong>');
-
-  // 箇条書き
   text = text.replace(/^[-*] (.+)$/gm, '<div class="issue-item">• $1</div>');
-
-  // 番号付きリスト
   text = text.replace(/^\d+\. (.+)$/gm, '<div class="issue-item info">$1</div>');
-
-  // 改行
   text = text.replace(/\n{2,}/g, '<br><br>');
   text = text.replace(/\n/g, '<br>');
-
   return text;
 }
 
 // ===== エラーフォーマット =====
 function formatError(err) {
-  if (err.message.includes('401')) {
-    return 'APIキーが無効です。正しいOpenAI APIキーを設定してください。';
+  const msg = err.message || '';
+  if (msg.includes('401')) {
+    return 'API キーが無効です。正しい OpenAI API キーを設定してください。';
   }
-  if (err.message.includes('429')) {
-    return 'APIのレート制限に達しました。しばらく待ってから再試行してください。';
+  if (msg.includes('429')) {
+    return 'API のレート制限に達しました。しばらく待ってから再試行してください。';
   }
-  if (err.message.includes('insufficient_quota')) {
-    return 'OpenAI APIの利用枠が不足しています。OpenAIのダッシュボードで残高を確認してください。';
+  if (msg.includes('insufficient_quota')) {
+    return 'OpenAI API の利用枠が不足しています。OpenAI のダッシュボードで残高を確認してください。';
   }
-  return err.message || '不明なエラーが発生しました。';
+  if (msg.includes('does not have access to model') || msg.includes('model_not_found')) {
+    return `選択中のモデルはお使いのプロジェクトでは利用できません。\n↻ ボタンを押して利用可能なモデルを取得し、別のモデルを選択してください。\n\n詳細: ${msg}`;
+  }
+  return msg || '不明なエラーが発生しました。';
 }
 
 // ===== UI ヘルパー =====

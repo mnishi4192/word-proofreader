@@ -26,7 +26,7 @@
           <input
             type="password"
             id="api-key"
-            placeholder="sk-..."
+            placeholder="sk-... または sk-proj-..."
             autocomplete="off"
           />
           <button id="toggle-key" class="btn-icon" title="表示/非表示">👁</button>
@@ -35,11 +35,25 @@
       </div>
       <div class="form-group">
         <label for="model-select">使用モデル</label>
-        <select id="model-select">
-          <option value="gpt-4o">GPT-4o（推奨）</option>
-          <option value="gpt-4o-mini">GPT-4o mini（高速・低コスト）</option>
-          <option value="gpt-4-turbo">GPT-4 Turbo</option>
-        </select>
+        <div class="input-row">
+          <select id="model-select">
+            <optgroup label="GPT-4o シリーズ">
+              <option value="gpt-4o">GPT-4o（高精度）</option>
+              <option value="gpt-4o-mini">GPT-4o mini（高速・低コスト）</option>
+            </optgroup>
+            <optgroup label="GPT-4.1 シリーズ">
+              <option value="gpt-4.1">GPT-4.1</option>
+              <option value="gpt-4.1-mini">GPT-4.1 mini（高速・低コスト）</option>
+              <option value="gpt-4.1-nano">GPT-4.1 nano（最速・最安）</option>
+            </optgroup>
+            <optgroup label="その他">
+              <option value="gpt-4-turbo">GPT-4 Turbo</option>
+              <option value="gpt-3.5-turbo">GPT-3.5 Turbo（低コスト）</option>
+            </optgroup>
+          </select>
+          <button id="fetch-models-btn" class="btn-icon" title="利用可能なモデルを API から取得して更新">↻</button>
+        </div>
+        <p class="hint" id="model-hint">API キーを保存後、↻ ボタンでお使いのプロジェクトで利用可能なモデルを取得できます。</p>
       </div>
       <button id="save-settings" class="btn btn-secondary">設定を保存</button>
       <span id="settings-saved" class="saved-msg" style="display:none;">✓ 保存しました</span>
