@@ -265,12 +265,68 @@ async function getDocumentText() {
 }
 
 // ===== OpenAI API 呼び出し =====
+// GPT-5 系は Responses API（/v1/responses）を使用する
+// gpt-4o / gpt-4.1 系は Chat Completions API（/v1/chat/completions）を使用する
 async function callOpenAI(apiKey, model, documentText) {
   const userMessage = `以下の文書を校正してください。\n\n---\n${documentText}\n---`;
 
-  // o1 / o3 / gpt-5 など新世代モデルは max_completion_tokens を使用する
-  // gpt-4o / gpt-4.1 など旧来のモデルは max_tokens を使用する
-  const usesMaxCompletionTokens = /^(o1|o3|o4|gpt-5|chatgpt-4o-latest)/.test(model);
+  // GPT-5 系モデルは Responses API を使用
+  const isGpt5 = /^gpt-5/.test(model);
+
+  if (isGpt5) {
+    return await callResponsesAPI(apiKey, model, userMessage);
+  } else {
+    return await callChatCompletionsAPI(apiKey, model, userMessage);
+  }
+}
+
+// GPT-5 系: Responses API
+async function callResponsesAPI(apiKey, model, userMessage) {
+  const requestBody = {
+    model: model,
+    instructions: SYSTEM_PROMPT,
+    input: userMessage,
+    max_output_tokens: 4096,
+  };
+
+  const response = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    const errMsg = errData.error?.message || `HTTP エラー ${response.status}`;
+    throw new Error(`OpenAI API エラー: ${errMsg}`);
+  }
+
+  const data = await response.json();
+
+  // Responses API のレスポンス構造: output[0].content[0].text
+  let text = '';
+  if (data.output && Array.isArray(data.output)) {
+    for (const item of data.output) {
+      if (item.content && Array.isArray(item.content)) {
+        for (const c of item.content) {
+          if (c.text) text += c.text;
+        }
+      }
+    }
+  }
+  // フォールバック: output_text フィールド
+  if (!text && data.output_text) text = data.output_text;
+
+  return text || '（結果を取得できませんでした）';
+}
+
+// 旧来モデル: Chat Completions API
+async function callChatCompletionsAPI(apiKey, model, userMessage) {
+  // o1 / o3 系は max_completion_tokens、それ以外は max_tokens
+  const usesMaxCompletionTokens = /^(o1|o3|o4)/.test(model);
   const tokenParam = usesMaxCompletionTokens
     ? { max_completion_tokens: 4096 }
     : { max_tokens: 4096 };
@@ -284,7 +340,7 @@ async function callOpenAI(apiKey, model, documentText) {
     ...tokenParam,
   };
 
-  // o1 / o3 系は temperature パラメータ非対応のため除外
+  // o1 / o3 系は temperature 非対応
   if (!usesMaxCompletionTokens) {
     requestBody.temperature = 0.2;
   }
