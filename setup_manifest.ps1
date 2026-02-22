@@ -10,14 +10,12 @@ Write-Host ""
 Write-Host "GitHub Pages の情報を入力してください。"
 Write-Host ""
 
-# GitHub ユーザー名の入力
 $GitHubUser = Read-Host "GitHub ユーザー名（例: tanaka）"
 if ([string]::IsNullOrWhiteSpace($GitHubUser)) {
     Write-Host "エラー: GitHub ユーザー名が入力されていません。" -ForegroundColor Red
     exit 1
 }
 
-# リポジトリ名の入力
 $RepoName = Read-Host "リポジトリ名（例: word-proofreader）"
 if ([string]::IsNullOrWhiteSpace($RepoName)) {
     Write-Host "エラー: リポジトリ名が入力されていません。" -ForegroundColor Red
@@ -29,8 +27,7 @@ Write-Host ""
 Write-Host "設定する URL: $BaseUrl" -ForegroundColor Yellow
 Write-Host ""
 
-# テンプレートから manifest.xml を生成
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ScriptDir    = Split-Path -Parent $MyInvocation.MyCommand.Path
 $TemplatePath = Join-Path $ScriptDir "manifest_template.xml"
 $OutputPath   = Join-Path $ScriptDir "manifest.xml"
 
@@ -42,7 +39,6 @@ $content | Set-Content $OutputPath -Encoding UTF8
 Write-Host "✓ manifest.xml を生成しました。" -ForegroundColor Green
 Write-Host ""
 
-# Word の Wef フォルダに自動コピー
 $WefDir = "$env:LOCALAPPDATA\Microsoft\Office\16.0\Wef"
 if (-not (Test-Path $WefDir)) {
     New-Item -ItemType Directory -Path $WefDir -Force | Out-Null

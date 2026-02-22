@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# 文書校正アシスタント - manifest.xml セットアップスクリプト
+# 文書校正アシスタント - manifest.xml セットアップスクリプト (Mac)
 # GitHub Pages の URL を入力すると manifest.xml を自動生成します
 # ============================================================
 
@@ -11,14 +11,12 @@ echo ""
 echo "GitHub Pages の情報を入力してください。"
 echo ""
 
-# GitHub ユーザー名の入力
 read -p "GitHub ユーザー名（例: tanaka）: " GITHUB_USER
 if [ -z "$GITHUB_USER" ]; then
   echo "エラー: GitHub ユーザー名が入力されていません。"
   exit 1
 fi
 
-# リポジトリ名の入力
 read -p "リポジトリ名（例: word-proofreader）: " REPO_NAME
 if [ -z "$REPO_NAME" ]; then
   echo "エラー: リポジトリ名が入力されていません。"
@@ -30,7 +28,6 @@ echo ""
 echo "設定する URL: ${BASE_URL}"
 echo ""
 
-# テンプレートから manifest.xml を生成
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 sed \
   -e "s|YOUR_GITHUB_USERNAME|${GITHUB_USER}|g" \
@@ -40,7 +37,6 @@ sed \
 echo "✓ manifest.xml を生成しました。"
 echo ""
 
-# Word の wef フォルダに自動コピー
 WEF_DIR="$HOME/Library/Containers/com.microsoft.Word/Data/Documents/wef"
 if [ -d "$HOME/Library/Containers/com.microsoft.Word" ]; then
   mkdir -p "$WEF_DIR"
