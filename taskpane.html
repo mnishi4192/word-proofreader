@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>文書校正アシスタント</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js" type="text/javascript"></script>
+  <link rel="stylesheet" href="taskpane.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- ヘッダー -->
+    <header class="header">
+      <div class="header-title">
+        <span class="header-icon">✏️</span>
+        <h1>文書校正アシスタント</h1>
+      </div>
+    </header>
+
+    <!-- API キー設定エリア -->
+    <section class="section" id="settings-section">
+      <h2 class="section-title">設定</h2>
+      <div class="form-group">
+        <label for="api-key">OpenAI API キー</label>
+        <div class="input-row">
+          <input
+            type="password"
+            id="api-key"
+            placeholder="sk-..."
+            autocomplete="off"
+          />
+          <button id="toggle-key" class="btn-icon" title="表示/非表示">👁</button>
+        </div>
+        <p class="hint">入力したキーはブラウザのローカルストレージに保存されます。</p>
+      </div>
+      <div class="form-group">
+        <label for="model-select">使用モデル</label>
+        <select id="model-select">
+          <option value="gpt-4o">GPT-4o（推奨）</option>
+          <option value="gpt-4o-mini">GPT-4o mini（高速・低コスト）</option>
+          <option value="gpt-4-turbo">GPT-4 Turbo</option>
+        </select>
+      </div>
+      <button id="save-settings" class="btn btn-secondary">設定を保存</button>
+      <span id="settings-saved" class="saved-msg" style="display:none;">✓ 保存しました</span>
+    </section>
+
+    <hr class="divider" />
+
+    <!-- 校正実行エリア -->
+    <section class="section">
+      <h2 class="section-title">校正実行</h2>
+      <p class="description">
+        Word 文書全体のテキストを取得し、OpenAI API で校正します。<br>
+        結果はこのパネルに一覧表示されます。
+      </p>
+      <button id="proofread-btn" class="btn btn-primary" disabled>
+        <span id="btn-text">文書を校正する</span>
+        <span id="btn-spinner" class="spinner" style="display:none;"></span>
+      </button>
+      <div id="progress-area" style="display:none;">
+        <div class="progress-bar">
+          <div id="progress-fill" class="progress-fill"></div>
+        </div>
+        <p id="progress-text" class="progress-text">文書を取得中...</p>
+      </div>
+    </section>
+
+    <hr class="divider" />
+
+    <!-- 結果表示エリア -->
+    <section class="section" id="results-section" style="display:none;">
+      <div class="results-header">
+        <h2 class="section-title">校正結果</h2>
+        <button id="copy-btn" class="btn btn-small" title="結果をコピー">コピー</button>
+      </div>
+      <div id="results-meta" class="results-meta"></div>
+      <div id="results-content" class="results-content"></div>
+    </section>
+
+    <!-- エラー表示エリア -->
+    <div id="error-area" class="error-area" style="display:none;">
+      <p id="error-message"></p>
+    </div>
+  </div>
+
+  <script src="taskpane.js"></script>
+</body>
+</html>

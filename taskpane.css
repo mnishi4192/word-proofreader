@@ -1,0 +1,337 @@
+/* ===== リセット・基本設定 ===== */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Hiragino Sans", "Yu Gothic UI", "Meiryo", "Segoe UI", sans-serif;
+  font-size: 13px;
+  color: #1a1a1a;
+  background: #f5f5f5;
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+#app {
+  max-width: 100%;
+  padding-bottom: 24px;
+}
+
+/* ===== ヘッダー ===== */
+.header {
+  background: #0078d4;
+  color: white;
+  padding: 12px 16px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-icon {
+  font-size: 18px;
+}
+
+.header h1 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* ===== セクション ===== */
+.section {
+  padding: 16px;
+  background: white;
+  margin: 8px;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0078d4;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.divider {
+  border: none;
+  border-top: 1px solid #e8e8e8;
+  margin: 0 8px;
+}
+
+/* ===== フォーム ===== */
+.form-group {
+  margin-bottom: 12px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 4px;
+}
+
+.input-row {
+  display: flex;
+  gap: 4px;
+}
+
+input[type="text"],
+input[type="password"],
+select {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  background: #fafafa;
+  transition: border-color 0.2s;
+  outline: none;
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+select:focus {
+  border-color: #0078d4;
+  background: white;
+}
+
+.hint {
+  font-size: 11px;
+  color: #888;
+  margin-top: 4px;
+}
+
+.saved-msg {
+  font-size: 12px;
+  color: #107c10;
+  margin-left: 8px;
+  font-weight: 600;
+}
+
+/* ===== ボタン ===== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, opacity 0.2s;
+  outline: none;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #0078d4;
+  color: white;
+  width: 100%;
+  padding: 10px;
+  font-size: 14px;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #006cbf;
+}
+
+.btn-secondary {
+  background: #f0f0f0;
+  color: #333;
+  font-size: 12px;
+  padding: 6px 12px;
+}
+
+.btn-secondary:hover {
+  background: #e0e0e0;
+}
+
+.btn-small {
+  background: #f0f0f0;
+  color: #333;
+  font-size: 11px;
+  padding: 4px 10px;
+}
+
+.btn-small:hover {
+  background: #e0e0e0;
+}
+
+.btn-icon {
+  background: none;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  padding: 7px 8px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.btn-icon:hover {
+  background: #f0f0f0;
+}
+
+/* ===== スピナー ===== */
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.4);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ===== プログレスバー ===== */
+.progress-bar {
+  height: 4px;
+  background: #e0e0e0;
+  border-radius: 2px;
+  margin-top: 12px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: #0078d4;
+  border-radius: 2px;
+  width: 0%;
+  transition: width 0.4s ease;
+  animation: indeterminate 1.5s ease infinite;
+}
+
+@keyframes indeterminate {
+  0% { transform: translateX(-100%); width: 60%; }
+  100% { transform: translateX(200%); width: 60%; }
+}
+
+.progress-text {
+  font-size: 11px;
+  color: #888;
+  margin-top: 6px;
+  text-align: center;
+}
+
+/* ===== 説明文 ===== */
+.description {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 12px;
+  line-height: 1.7;
+}
+
+/* ===== 結果エリア ===== */
+.results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.results-header .section-title {
+  margin-bottom: 0;
+}
+
+.results-meta {
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 12px;
+  padding: 6px 10px;
+  background: #f8f8f8;
+  border-radius: 4px;
+  border-left: 3px solid #0078d4;
+}
+
+.results-content {
+  font-size: 13px;
+  line-height: 1.8;
+  color: #1a1a1a;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 校正結果の赤字表示 */
+.results-content .correction {
+  color: #c42b1c;
+  font-weight: 600;
+  background: #fff0ee;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.results-content .section-header {
+  font-weight: 700;
+  color: #0078d4;
+  margin-top: 16px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  border-bottom: 1px solid #e0e0e0;
+  padding-bottom: 4px;
+}
+
+.results-content .issue-item {
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: #fafafa;
+  border-radius: 4px;
+  border-left: 3px solid #e0e0e0;
+  font-size: 12px;
+}
+
+.results-content .issue-item.error {
+  border-left-color: #c42b1c;
+  background: #fff8f7;
+}
+
+.results-content .issue-item.warning {
+  border-left-color: #f7a800;
+  background: #fffbf0;
+}
+
+.results-content .issue-item.info {
+  border-left-color: #0078d4;
+  background: #f0f7ff;
+}
+
+/* ===== エラーエリア ===== */
+.error-area {
+  margin: 8px;
+  padding: 12px 14px;
+  background: #fde7e9;
+  border: 1px solid #f1707b;
+  border-radius: 6px;
+  color: #c42b1c;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* ===== レスポンシブ対応 ===== */
+@media (max-width: 320px) {
+  .header h1 { font-size: 13px; }
+  .section { padding: 12px; }
+}
