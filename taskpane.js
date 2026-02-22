@@ -268,21 +268,34 @@ async function getDocumentText() {
 async function callOpenAI(apiKey, model, documentText) {
   const userMessage = `以下の文書を校正してください。\n\n---\n${documentText}\n---`;
 
+  // o1 / o3 / gpt-5 など新世代モデルは max_completion_tokens を使用する
+  // gpt-4o / gpt-4.1 など旧来のモデルは max_tokens を使用する
+  const usesMaxCompletionTokens = /^(o1|o3|o4|gpt-5|chatgpt-4o-latest)/.test(model);
+  const tokenParam = usesMaxCompletionTokens
+    ? { max_completion_tokens: 4096 }
+    : { max_tokens: 4096 };
+
+  const requestBody = {
+    model: model,
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user',   content: userMessage },
+    ],
+    ...tokenParam,
+  };
+
+  // o1 / o3 系は temperature パラメータ非対応のため除外
+  if (!usesMaxCompletionTokens) {
+    requestBody.temperature = 0.2;
+  }
+
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model: model,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user',   content: userMessage },
-      ],
-      temperature: 0.2,
-      max_tokens: 4096,
-    }),
+    body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
