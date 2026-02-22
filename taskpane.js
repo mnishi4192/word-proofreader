@@ -1,8 +1,8 @@
 /* =========================================================
-   文書校正アシスタント - taskpane.js  v8
-   - 文書を約 1,500 字のチャンクに分割して順次送信
-   - タイムアウト時は最大 3 回まで自動リトライ
-   - 各チャンクの進捗をリアルタイム表示
+   文書校正アシスタント - taskpane.js  v9
+   - 全モデルを Chat Completions API（stream: true）に統一
+   - ストリーミングにより長文書でもタイムアウトしない
+   - GPT-5 系を含む全モデルで動作
    ========================================================= */
 
 'use strict';
@@ -33,13 +33,6 @@ const SYSTEM_PROMPT = `このGPTは、編集者の視点から日本語文書を
 
 ### 5. 総評
 （文書全体の品質について簡潔に総評）`;
-
-// 1 チャンクあたりの最大文字数（約 1,500 字）
-const CHUNK_SIZE = 1500;
-// 1 リクエストあたりのタイムアウト（秒）
-const REQUEST_TIMEOUT_SEC = 90;
-// タイムアウト時の最大リトライ回数
-const MAX_RETRIES = 3;
 
 // ===== DOM 要素の取得 =====
 let apiKeyInput, modelSelect, saveSettingsBtn, settingsSavedMsg;
@@ -225,10 +218,12 @@ async function runProofread() {
       throw new Error('文書にテキストが見つかりませんでした。文書にテキストを入力してから再試行してください。');
     }
 
-    // Step 2: 文書を分割して順次送信
-    const result = await callOpenAIWithChunking(apiKey, model, documentText);
+    setProgress(`${model} で校正中... （しばらくお待ちください）`);
 
-    setProgress('結果を表示中...');
+    // Step 2: ストリーミングで API 呼び出し・リアルタイム表示
+    const result = await callOpenAIStreaming(apiKey, model, documentText);
+
+    setProgress('完了');
 
     // Step 3: 結果を表示
     displayResults(result, documentText, model);
@@ -257,199 +252,18 @@ async function getDocumentText() {
   });
 }
 
-// ===== 文書分割・順次送信 =====
-async function callOpenAIWithChunking(apiKey, model, documentText) {
-  // 文書が短い場合はそのまま送信
-  if (documentText.length <= CHUNK_SIZE) {
-    setProgress(`OpenAI API（${model}）に送信中...`);
-    return await callOpenAIWithRetry(apiKey, model, documentText, 1, 1);
-  }
+// ===== ストリーミング対応 Chat Completions API 呼び出し =====
+// stream: true を使うことで、応答が届き始めた瞬間からデータを受信し続け
+// タイムアウトを根本的に回避する。GPT-5 系を含む全モデルで動作する。
+async function callOpenAIStreaming(apiKey, model, documentText) {
+  const userMessage = `以下の文書を校正してください。\n\n---\n${documentText}\n---`;
 
-  // 文書を段落単位で分割
-  const chunks = splitIntoChunks(documentText, CHUNK_SIZE);
-  const totalChunks = chunks.length;
-  const results = [];
-
-  setProgress(`文書を ${totalChunks} ブロックに分割して処理します...`);
-  await sleep(500);
-
-  for (let i = 0; i < totalChunks; i++) {
-    setProgress(`ブロック ${i + 1} / ${totalChunks} を処理中...`);
-    const chunkResult = await callOpenAIWithRetry(apiKey, model, chunks[i], i + 1, totalChunks);
-    results.push(chunkResult);
-  }
-
-  // 複数チャンクの結果を結合
-  if (results.length === 1) {
-    return results[0];
-  }
-
-  return results.map((r, i) =>
-    `## 【ブロック ${i + 1} / ${results.length} の校正結果】\n\n${r}`
-  ).join('\n\n---\n\n');
-}
-
-// ===== 文書を段落単位で CHUNK_SIZE 字以内に分割 =====
-function splitIntoChunks(text, maxSize) {
-  // 段落（空行）で分割
-  const paragraphs = text.split(/\n\s*\n/);
-  const chunks = [];
-  let current = '';
-
-  for (const para of paragraphs) {
-    const candidate = current ? current + '\n\n' + para : para;
-
-    if (candidate.length <= maxSize) {
-      current = candidate;
-    } else {
-      // 現在のチャンクを確定
-      if (current) chunks.push(current);
-
-      // 段落自体が maxSize を超える場合は強制分割
-      if (para.length > maxSize) {
-        const subChunks = forceChunk(para, maxSize);
-        // 最後のサブチャンクを次の current に
-        chunks.push(...subChunks.slice(0, -1));
-        current = subChunks[subChunks.length - 1];
-      } else {
-        current = para;
-      }
-    }
-  }
-
-  if (current) chunks.push(current);
-  return chunks.filter(c => c.trim().length > 0);
-}
-
-// 強制的に maxSize 字で分割
-function forceChunk(text, maxSize) {
-  const chunks = [];
-  for (let i = 0; i < text.length; i += maxSize) {
-    chunks.push(text.slice(i, i + maxSize));
-  }
-  return chunks;
-}
-
-// ===== リトライ付き API 呼び出し =====
-async function callOpenAIWithRetry(apiKey, model, chunkText, chunkIndex, totalChunks) {
-  let lastError;
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      if (attempt > 1) {
-        setProgress(`ブロック ${chunkIndex} / ${totalChunks}：リトライ中（${attempt} 回目）...`);
-        await sleep(2000 * attempt); // リトライ間隔を指数的に増加
-      }
-
-      const userMessage = totalChunks > 1
-        ? `以下は文書の一部（ブロック ${chunkIndex}/${totalChunks}）です。この部分を校正してください。\n\n---\n${chunkText}\n---`
-        : `以下の文書を校正してください。\n\n---\n${chunkText}\n---`;
-
-      const isGpt5 = /^gpt-5/.test(model);
-      if (isGpt5) {
-        return await callResponsesAPI(apiKey, model, userMessage);
-      } else {
-        return await callChatCompletionsAPI(apiKey, model, userMessage);
-      }
-
-    } catch (err) {
-      lastError = err;
-      const isRetryable = err.name === 'AbortError'
-        || (err.message && (
-          err.message.includes('タイムアウト') ||
-          err.message.includes('timeout') ||
-          err.message.includes('network') ||
-          err.message.includes('fetch') ||
-          err.message.includes('503') ||
-          err.message.includes('502') ||
-          err.message.includes('500')
-        ));
-
-      if (!isRetryable || attempt === MAX_RETRIES) {
-        throw err;
-      }
-      console.warn(`ブロック ${chunkIndex}: ${attempt} 回目失敗、リトライします。エラー: ${err.message}`);
-    }
-  }
-
-  throw lastError;
-}
-
-// ===== GPT-5 系: Responses API =====
-async function callResponsesAPI(apiKey, model, userMessage) {
-  const requestBody = {
-    model: model,
-    instructions: SYSTEM_PROMPT,
-    input: userMessage,
-    max_output_tokens: 8192,
-  };
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_SEC * 1000);
-
-  let response;
-  try {
-    response = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(requestBody),
-      signal: controller.signal,
-    });
-  } catch (fetchErr) {
-    if (fetchErr.name === 'AbortError') {
-      const err = new Error(`タイムアウト（${REQUEST_TIMEOUT_SEC}秒）`);
-      err.name = 'AbortError';
-      throw err;
-    }
-    throw fetchErr;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-
-  if (!response.ok) {
-    const errData = await response.json().catch(() => ({}));
-    const errMsg = errData.error?.message || `HTTP エラー ${response.status}`;
-    throw new Error(`OpenAI API エラー: ${errMsg}`);
-  }
-
-  const data = await response.json();
-
-  if (data.status && data.status !== 'completed' && data.status !== 'incomplete') {
-    const reason = data.incomplete_details?.reason || data.error?.message || data.status;
-    throw new Error(`API がステータス "${data.status}" を返しました（原因: ${reason}）。`);
-  }
-
-  // レスポンス構造: output[0].content[0].text
-  let text = '';
-  if (data.output && Array.isArray(data.output)) {
-    for (const item of data.output) {
-      if (item.content && Array.isArray(item.content)) {
-        for (const c of item.content) {
-          if (c.text) text += c.text;
-        }
-      }
-      if (!text && item.text) text += item.text;
-    }
-  }
-  if (!text && data.output_text) text = data.output_text;
-
-  if (!text) {
-    const preview = JSON.stringify(data).slice(0, 300);
-    throw new Error(`レスポンスからテキストを取得できませんでした。レスポンス内容: ${preview}`);
-  }
-
-  return text;
-}
-
-// ===== 旧来モデル: Chat Completions API =====
-async function callChatCompletionsAPI(apiKey, model, userMessage) {
+  // o1 / o3 / o4 系は max_completion_tokens、それ以外は max_tokens
+  // GPT-5 系は Chat Completions API で動作する
   const usesMaxCompletionTokens = /^(o1|o3|o4)/.test(model);
   const tokenParam = usesMaxCompletionTokens
-    ? { max_completion_tokens: 8192 }
-    : { max_tokens: 8192 };
+    ? { max_completion_tokens: 16384 }
+    : { max_tokens: 16384 };
 
   const requestBody = {
     model: model,
@@ -457,37 +271,23 @@ async function callChatCompletionsAPI(apiKey, model, userMessage) {
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user',   content: userMessage },
     ],
+    stream: true,   // ストリーミング有効化
     ...tokenParam,
   };
 
+  // o1 / o3 系は temperature 非対応
   if (!usesMaxCompletionTokens) {
     requestBody.temperature = 0.2;
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_SEC * 1000);
-
-  let response;
-  try {
-    response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(requestBody),
-      signal: controller.signal,
-    });
-  } catch (fetchErr) {
-    if (fetchErr.name === 'AbortError') {
-      const err = new Error(`タイムアウト（${REQUEST_TIMEOUT_SEC}秒）`);
-      err.name = 'AbortError';
-      throw err;
-    }
-    throw fetchErr;
-  } finally {
-    clearTimeout(timeoutId);
-  }
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(requestBody),
+  });
 
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
@@ -495,15 +295,48 @@ async function callChatCompletionsAPI(apiKey, model, userMessage) {
     throw new Error(`OpenAI API エラー: ${errMsg}`);
   }
 
-  const data = await response.json();
+  // ストリーミングレスポンスを読み取る
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let fullText = '';
+  let buffer = '';
+  let charCount = 0;
 
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) {
-    const preview = JSON.stringify(data).slice(0, 300);
-    throw new Error(`レスポンスからテキストを取得できませんでした。レスポンス内容: ${preview}`);
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE（Server-Sent Events）形式のデータを行ごとに処理
+    const lines = buffer.split('\n');
+    buffer = lines.pop(); // 末尾の不完全な行はバッファに残す
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed === 'data: [DONE]') continue;
+      if (!trimmed.startsWith('data: ')) continue;
+
+      try {
+        const json = JSON.parse(trimmed.slice(6)); // "data: " を除去
+        const delta = json.choices?.[0]?.delta?.content;
+        if (delta) {
+          fullText += delta;
+          charCount += delta.length;
+          // 受信文字数をリアルタイムで表示
+          setProgress(`${model} で校正中... （${charCount} 字受信済み）`);
+        }
+      } catch (_) {
+        // JSON パースエラーは無視（不完全なチャンクの場合がある）
+      }
+    }
   }
 
-  return content;
+  if (!fullText.trim()) {
+    throw new Error('API からの応答が空でした。モデルを変更するか、しばらく待ってから再試行してください。');
+  }
+
+  return fullText;
 }
 
 // ===== 結果表示 =====
@@ -553,6 +386,9 @@ function formatError(err) {
   if (msg.includes('does not have access to model') || msg.includes('model_not_found')) {
     return `選択中のモデルはお使いのプロジェクトでは利用できません。\n↻ ボタンを押して利用可能なモデルを取得し、別のモデルを選択してください。\n\n詳細: ${msg}`;
   }
+  if (msg.includes('stream') || msg.includes('ReadableStream') || msg.includes('body')) {
+    return `ストリーミング読み取りに失敗しました。ブラウザの互換性の問題の可能性があります。\n\n詳細: ${msg}`;
+  }
   return msg || '不明なエラーが発生しました。';
 }
 
@@ -574,8 +410,4 @@ function showError(msg) {
 
 function hideError() {
   errorArea.style.display = 'none';
-}
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }
