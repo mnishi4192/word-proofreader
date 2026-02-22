@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>文書校正アシスタント</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <link rel="stylesheet" href="taskpane.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ヘッダー -->
+    <div class="header">
+      <span class="header-icon">✏️</span>
+      <span class="header-title">文書校正アシスタント</span>
+    </div>
+
+    <!-- 設定セクション -->
+    <div class="section">
+      <div class="section-title">設定</div>
+
+      <label class="label">OpenAI API キー</label>
+      <div class="input-row">
+        <input type="password" id="api-key" placeholder="sk-proj-..." autocomplete="off">
+        <button id="toggle-key" class="btn-icon" title="表示/非表示">👁</button>
+      </div>
+
+      <label class="label">モデル</label>
+      <div class="input-row">
+        <select id="model-select">
+          <optgroup label="GPT-5 系">
+            <option value="gpt-5">gpt-5</option>
+            <option value="gpt-5-mini">gpt-5-mini</option>
+          </optgroup>
+          <optgroup label="GPT-4.1 系">
+            <option value="gpt-4.1">gpt-4.1</option>
+            <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+            <option value="gpt-4.1-nano">gpt-4.1-nano</option>
+          </optgroup>
+          <optgroup label="GPT-4o 系">
+            <option value="gpt-4o" selected>gpt-4o</option>
+            <option value="gpt-4o-mini">gpt-4o-mini</option>
+          </optgroup>
+          <optgroup label="その他">
+            <option value="gpt-4-turbo">gpt-4-turbo</option>
+            <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+          </optgroup>
+        </select>
+        <button id="fetch-models-btn" class="btn-icon" title="利用可能なモデルを取得">↻</button>
+      </div>
+      <div id="model-hint" class="hint"></div>
+
+      <div class="btn-row">
+        <button id="save-settings" class="btn-secondary">保存</button>
+        <span id="settings-saved" class="saved-msg" style="display:none">✓ 保存しました</span>
+      </div>
+    </div>
+
+    <!-- 校正実行セクション -->
+    <div class="section">
+      <div class="section-title">校正実行</div>
+      <p class="description">Word 文書全体のテキストを取得し、OpenAI API で校正します。<br>結果はこのパネルに一覧表示されます。</p>
+      <button id="proofread-btn" class="btn-primary" disabled>
+        <span id="btn-spinner" class="spinner" style="display:none"></span>
+        <span id="btn-text">文書を校正する</span>
+      </button>
+    </div>
+
+    <!-- 進捗表示 -->
+    <div id="progress-area" style="display:none" class="progress-area">
+      <div class="progress-spinner"></div>
+      <div id="progress-text" class="progress-text">処理中...</div>
+    </div>
+
+    <!-- エラー表示 -->
+    <div id="error-area" style="display:none" class="error-area">
+      <div class="error-title">⚠️ エラー</div>
+      <div id="error-message" class="error-message"></div>
+    </div>
+
+    <!-- 校正結果 -->
+    <div id="results-section" style="display:none" class="section">
+      <div class="results-header">
+        <div class="section-title">校正結果</div>
+        <button id="copy-btn" class="btn-small">コピー</button>
+      </div>
+      <div id="results-meta" class="results-meta"></div>
+      <div id="results-content" class="results-content"></div>
+    </div>
+
+  </div>
+  <script src="taskpane.js"></script>
+</body>
+</html>

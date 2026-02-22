@@ -1,0 +1,295 @@
+/* 文書校正アシスタント - taskpane.css */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+  font-size: 13px;
+  color: #333;
+  background: #f5f5f5;
+  line-height: 1.5;
+}
+
+#app { padding: 0 0 24px 0; }
+
+/* ヘッダー */
+.header {
+  background: #2c5f8a;
+  color: white;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: bold;
+  margin-bottom: 12px;
+}
+.header-icon { font-size: 16px; }
+
+/* セクション */
+.section {
+  background: white;
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin: 0 10px 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.section-title {
+  font-size: 12px;
+  font-weight: bold;
+  color: #2c5f8a;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #e8eef3;
+}
+
+/* ラベル */
+.label {
+  display: block;
+  font-size: 11px;
+  color: #666;
+  margin-bottom: 4px;
+  margin-top: 8px;
+}
+.label:first-of-type { margin-top: 0; }
+
+/* 入力行 */
+.input-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.input-row input,
+.input-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+input[type="password"],
+input[type="text"] {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #d0d7de;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: monospace;
+  outline: none;
+  transition: border-color 0.2s;
+}
+input:focus { border-color: #2c5f8a; }
+
+select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #d0d7de;
+  border-radius: 4px;
+  font-size: 12px;
+  background: white;
+  outline: none;
+  cursor: pointer;
+}
+select:focus { border-color: #2c5f8a; }
+
+.hint {
+  font-size: 11px;
+  color: #666;
+  margin-top: 4px;
+  min-height: 16px;
+}
+
+/* ボタン行 */
+.btn-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* プライマリボタン */
+.btn-primary {
+  width: 100%;
+  padding: 12px;
+  background: #2c5f8a;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background 0.2s;
+  margin-top: 8px;
+}
+.btn-primary:hover:not(:disabled) { background: #1e4a6e; }
+.btn-primary:disabled { background: #9ab3c8; cursor: not-allowed; }
+
+/* セカンダリボタン */
+.btn-secondary {
+  padding: 6px 14px;
+  background: #e8eef3;
+  color: #2c5f8a;
+  border: 1px solid #c5d3de;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-secondary:hover { background: #d5e3ee; }
+
+/* アイコンボタン */
+.btn-icon {
+  padding: 6px 10px;
+  background: #e8eef3;
+  border: 1px solid #c5d3de;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+.btn-icon:hover { background: #d5e3ee; }
+
+/* スモールボタン */
+.btn-small {
+  padding: 4px 10px;
+  background: #e8eef3;
+  border: 1px solid #c5d3de;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.btn-small:hover { background: #d5e3ee; }
+
+/* 保存済みメッセージ */
+.saved-msg {
+  font-size: 11px;
+  color: #27ae60;
+  font-weight: bold;
+}
+
+/* 説明文 */
+.description {
+  font-size: 12px;
+  color: #555;
+  line-height: 1.6;
+}
+
+/* スピナー */
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.4);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 進捗エリア */
+.progress-area {
+  background: white;
+  border-radius: 6px;
+  padding: 16px 14px;
+  margin: 0 10px 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.progress-spinner {
+  width: 20px;
+  height: 20px;
+  border: 3px solid #e8eef3;
+  border-top-color: #2c5f8a;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+.progress-text {
+  font-size: 12px;
+  color: #555;
+  word-break: break-all;
+}
+
+/* エラーエリア */
+.error-area {
+  background: #fff5f5;
+  border: 1px solid #fcc;
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin: 0 10px 10px;
+}
+.error-title {
+  font-size: 12px;
+  font-weight: bold;
+  color: #c0392b;
+  margin-bottom: 6px;
+}
+.error-message {
+  font-size: 12px;
+  color: #c0392b;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* 結果ヘッダー */
+.results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #e8eef3;
+}
+.results-header .section-title { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+
+/* 結果メタ情報 */
+.results-meta {
+  font-size: 11px;
+  color: #777;
+  background: #f8fafc;
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-bottom: 10px;
+  line-height: 1.8;
+}
+
+/* 結果コンテンツ */
+.results-content {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #333;
+}
+.section-header {
+  font-weight: bold;
+  color: #2c5f8a;
+  margin: 12px 0 6px;
+  font-size: 13px;
+}
+.issue-item {
+  padding: 4px 0 4px 8px;
+  border-left: 2px solid #d0d7de;
+  margin: 4px 0;
+  color: #444;
+}
+.issue-item.info {
+  border-left-color: #2c5f8a;
+  color: #333;
+}
+.correction del {
+  color: #c0392b;
+  text-decoration: line-through;
+}
+.correction {
+  background: #fff3cd;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 12px;
+}
