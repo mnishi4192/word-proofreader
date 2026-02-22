@@ -286,17 +286,32 @@ async function callResponsesAPI(apiKey, model, userMessage) {
     model: model,
     instructions: SYSTEM_PROMPT,
     input: userMessage,
-    max_output_tokens: 4096,
+    max_output_tokens: 16384,  // 長文書対応のため上限を拡大
   };
 
-  const response = await fetch('https://api.openai.com/v1/responses', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(requestBody),
-  });
+  // 120秒タイムアウト付き fetch
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+  let response;
+  try {
+    response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+  } catch (fetchErr) {
+    if (fetchErr.name === 'AbortError') {
+      throw new Error('リクエストがタイムアウトしました（120秒）。文書が長すぎる場合は、文書を分割して再試行してください。');
+    }
+    throw fetchErr;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
@@ -305,6 +320,19 @@ async function callResponsesAPI(apiKey, model, userMessage) {
   }
 
   const data = await response.json();
+
+  // ステータスチェック: incomplete / failed の場合は原因を表示
+  if (data.status && data.status !== 'completed') {
+    const reason = data.incomplete_details?.reason
+      || data.error?.message
+      || data.status;
+    // incompleteなら部分結果があればそれを返す（山切れでも表示する）
+    if (data.status !== 'incomplete') {
+      throw new Error(`API がステータス "${data.status}" を返しました（原因: ${reason}）。`);
+    }
+    // incomplete の場合は山切れを注意書きして結果を返す
+    console.warn(`山切れあり (${reason})。部分結果を表示します。`);
+  }
 
   // Responses API のレスポンス構造: output[0].content[0].text
   let text = '';
@@ -315,12 +343,20 @@ async function callResponsesAPI(apiKey, model, userMessage) {
           if (c.text) text += c.text;
         }
       }
+      // フォールバック: item 直下の text
+      if (!text && item.text) text += item.text;
     }
   }
   // フォールバック: output_text フィールド
   if (!text && data.output_text) text = data.output_text;
 
-  return text || '（結果を取得できませんでした）';
+  if (!text) {
+    // デバッグ用にレスポンス全体をエラーメッセージに含める
+    const preview = JSON.stringify(data).slice(0, 300);
+    throw new Error(`レスポンスからテキストを取得できませんでした。レスポンス内容: ${preview}`);
+  }
+
+  return text;
 }
 
 // 旧来モデル: Chat Completions API
@@ -328,8 +364,8 @@ async function callChatCompletionsAPI(apiKey, model, userMessage) {
   // o1 / o3 系は max_completion_tokens、それ以外は max_tokens
   const usesMaxCompletionTokens = /^(o1|o3|o4)/.test(model);
   const tokenParam = usesMaxCompletionTokens
-    ? { max_completion_tokens: 4096 }
-    : { max_tokens: 4096 };
+    ? { max_completion_tokens: 16384 }
+    : { max_tokens: 16384 };  // 長文書対応のため上限を拡大
 
   const requestBody = {
     model: model,
@@ -345,14 +381,29 @@ async function callChatCompletionsAPI(apiKey, model, userMessage) {
     requestBody.temperature = 0.2;
   }
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(requestBody),
-  });
+  // 120秒タイムアウト付き fetch
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+  let response;
+  try {
+    response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+  } catch (fetchErr) {
+    if (fetchErr.name === 'AbortError') {
+      throw new Error('リクエストがタイムアウトしました（120秒）。文書が長すぎる場合は、文書を分割して再試行してください。');
+    }
+    throw fetchErr;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
@@ -361,7 +412,20 @@ async function callChatCompletionsAPI(apiKey, model, userMessage) {
   }
 
   const data = await response.json();
-  return data.choices?.[0]?.message?.content || '（結果を取得できませんでした）';
+
+  // finish_reason チェック: length の場合は山切れを警告
+  const finishReason = data.choices?.[0]?.finish_reason;
+  if (finishReason === 'length') {
+    console.warn('出力トークン数の上限に達したため、結果が山切れとなっている可能性があります。');
+  }
+
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) {
+    const preview = JSON.stringify(data).slice(0, 300);
+    throw new Error(`レスポンスからテキストを取得できませんでした。レスポンス内容: ${preview}`);
+  }
+
+  return content;
 }
 
 // ===== 結果表示 =====
