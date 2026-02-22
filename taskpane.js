@@ -3,6 +3,7 @@
    - 全モデルを Chat Completions API + stream:true で統一
    - ブロック分割なし。文書全体を1回のリクエストで送信
    - ストリーミングにより長文書でもタイムアウトしない
+   - gpt-5 系を含む新世代モデルは max_completion_tokens を使用
    ========================================================= */
 
 'use strict';
@@ -79,7 +80,6 @@ function loadSettings() {
   const savedModel = localStorage.getItem('proofreader_model') || 'gpt-4o';
   apiKeyInput.value = savedKey;
 
-  // 保存済みモデルが選択肢になければ追加
   if (!Array.from(modelSelect.options).find(o => o.value === savedModel)) {
     const opt = document.createElement('option');
     opt.value = savedModel;
@@ -193,9 +193,7 @@ async function runProofread() {
 
     setProgress(`${model} で校正中... お待ちください`);
 
-    // ストリーミングで API 呼び出し
     const result = await callOpenAIStream(apiKey, model, docText);
-
     displayResults(result, docText, model);
 
   } catch (err) {
@@ -222,23 +220,41 @@ function getDocumentText() {
   });
 }
 
+// ===== トークンパラメータの判定 =====
+// max_completion_tokens を使うモデル:
+//   - o1 / o3 / o4 系（推論モデル）
+//   - gpt-5 系（新世代モデル: gpt-5, gpt-5-mini, gpt-5.1, gpt-5.2 など）
+// それ以外（gpt-4o, gpt-4.1, gpt-3.5 など）は max_tokens を使う
+function usesMaxCompletionTokens(model) {
+  return /^(o1|o3|o4|gpt-5)/.test(model);
+}
+
 // ===== ストリーミング API 呼び出し =====
 // stream:true を使い、応答を少しずつ受信することでタイムアウトを回避する。
 // ブロック分割は行わず、文書全体を1回のリクエストで送信する。
 async function callOpenAIStream(apiKey, model, docText) {
   const userMsg = `以下の文書を校正してください。\n\n---\n${docText}\n---`;
 
-  // o1/o3/o4 系は max_completion_tokens、それ以外は max_tokens
-  const isReasoning = /^(o1|o3|o4)/.test(model);
-  const body = {
+  const useCompletionTokens = usesMaxCompletionTokens(model);
+
+  const requestBody = {
     model,
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user',   content: userMsg },
     ],
     stream: true,
-    ...(isReasoning ? { max_completion_tokens: 16384 } : { max_tokens: 16384, temperature: 0.2 }),
   };
+
+  if (useCompletionTokens) {
+    // gpt-5 系 / o1 / o3 / o4 系: max_completion_tokens を使用
+    // temperature は非対応のため設定しない
+    requestBody.max_completion_tokens = 16384;
+  } else {
+    // gpt-4o / gpt-4.1 / gpt-3.5 など: max_tokens を使用
+    requestBody.max_tokens = 16384;
+    requestBody.temperature = 0.2;
+  }
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -246,7 +262,7 @@ async function callOpenAIStream(apiKey, model, docText) {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(requestBody),
   });
 
   if (!res.ok) {
@@ -326,6 +342,8 @@ function formatError(err) {
   if (m.includes('insufficient_quota'))     return 'OpenAI API の利用枠が不足しています。残高を確認してください。';
   if (m.includes('does not have access') || m.includes('model_not_found'))
     return `このモデルはご利用のプロジェクトで使用できません。↻ ボタンで利用可能なモデルを取得してください。\n\n詳細: ${m}`;
+  if (m.includes('max_tokens'))
+    return `トークンパラメータのエラーです。↻ ボタンでモデル一覧を再取得し、別のモデルを試してください。\n\n詳細: ${m}`;
   return m || '不明なエラーが発生しました。';
 }
 
