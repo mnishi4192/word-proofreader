@@ -1,4 +1,4 @@
-/* 文書校正アシスタント - taskpane.css */
+/* 文書校正アシスタント - taskpane.css (multi-service) */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -44,6 +44,37 @@ body {
   padding-bottom: 6px;
   border-bottom: 1px solid #e8eef3;
 }
+
+/* サービスタブ */
+.service-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 2px solid #e8eef3;
+  padding-bottom: 0;
+}
+.service-tab {
+  padding: 6px 14px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  font-size: 12px;
+  font-weight: bold;
+  color: #888;
+  cursor: pointer;
+  border-radius: 4px 4px 0 0;
+  transition: color 0.15s, border-color 0.15s;
+}
+.service-tab:hover { color: #2c5f8a; }
+.service-tab.active {
+  color: #2c5f8a;
+  border-bottom-color: #2c5f8a;
+  background: #f0f6fb;
+}
+
+/* サービスパネル */
+.service-panel { padding-top: 4px; }
 
 /* ラベル */
 .label {
@@ -293,3 +324,17 @@ select:focus { border-color: #2c5f8a; }
   border-radius: 3px;
   font-size: 12px;
 }
+
+/* サービスバッジ（結果メタ情報内） */
+.badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: bold;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+.badge-openai { background: #e8f4fd; color: #0d6efd; }
+.badge-gemini { background: #e8f8f0; color: #1a8a4a; }
+.badge-claude { background: #fdf0e8; color: #c05a00; }

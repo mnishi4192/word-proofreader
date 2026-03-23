@@ -1,13 +1,15 @@
 /* =========================================================
-   文書校正アシスタント - taskpane.js
-   - 全モデルを Chat Completions API + stream:true で統一
-   - ブロック分割なし。文書全体を1回のリクエストで送信
-   - ストリーミングにより長文書でもタイムアウトしない
-   - gpt-5 系を含む新世代モデルは max_completion_tokens を使用
+   文書校正アシスタント - taskpane.js (multi-service)
+   対応サービス: OpenAI / Gemini / Claude
+   - 各サービスの API キーはサービスごとに localStorage に保存
+   - OpenAI: Chat Completions API + stream:true
+   - Gemini: generateContent API (gemini-2.5-flash 固定可)
+   - Claude: Messages API + stream:true
    ========================================================= */
 
 'use strict';
 
+// ===== 校正システムプロンプト =====
 const SYSTEM_PROMPT = `このGPTは、編集者の視点から日本語文書を推敲し、改善を提案します。
 特に、誤字脱字、変換ミス、表記ミスに注目し、数字やアルファベットの表記が半角で統一されているかを確認します。文章表現の技巧にはあまり踏み込まず、かなやアルファベットで複数回出てくる固有名詞の表記揺れ、削除可能な指示代名詞、同じ文頭や文末表現が連続する部分、同音異義語の誤用を指摘します。読みやすさについても評価してください。
 指摘は具体的に、何行目のどの部分に関するものかを、文章の形で示します。
@@ -34,13 +36,15 @@ const SYSTEM_PROMPT = `このGPTは、編集者の視点から日本語文書を
 ### 5. 総評
 （文書全体の品質について簡潔に総評）`;
 
-// DOM 要素
-let apiKeyInput, modelSelect, saveSettingsBtn, settingsSavedMsg;
-let toggleKeyBtn, fetchModelsBtn, modelHint;
+// ===== 状態管理 =====
+let currentService = 'openai'; // 'openai' | 'gemini' | 'claude'
+
+// ===== DOM 要素キャッシュ =====
 let proofreadBtn, btnText, btnSpinner;
 let progressArea, progressText;
 let resultsSection, resultsMeta, resultsContent;
 let copyBtn, errorArea, errorMessage;
+let saveSettingsBtn, settingsSavedMsg;
 
 // ===== 初期化 =====
 Office.onReady(function (info) {
@@ -48,20 +52,11 @@ Office.onReady(function (info) {
     initDOM();
     loadSettings();
     bindEvents();
-    if ((localStorage.getItem('proofreader_api_key') || '').length > 10) {
-      proofreadBtn.disabled = false;
-    }
+    updateProofreadBtnState();
   }
 });
 
 function initDOM() {
-  apiKeyInput      = document.getElementById('api-key');
-  modelSelect      = document.getElementById('model-select');
-  saveSettingsBtn  = document.getElementById('save-settings');
-  settingsSavedMsg = document.getElementById('settings-saved');
-  toggleKeyBtn     = document.getElementById('toggle-key');
-  fetchModelsBtn   = document.getElementById('fetch-models-btn');
-  modelHint        = document.getElementById('model-hint');
   proofreadBtn     = document.getElementById('proofread-btn');
   btnText          = document.getElementById('btn-text');
   btnSpinner       = document.getElementById('btn-spinner');
@@ -73,43 +68,105 @@ function initDOM() {
   copyBtn          = document.getElementById('copy-btn');
   errorArea        = document.getElementById('error-area');
   errorMessage     = document.getElementById('error-message');
+  saveSettingsBtn  = document.getElementById('save-settings');
+  settingsSavedMsg = document.getElementById('settings-saved');
 }
 
+// ===== 設定の読み込み =====
 function loadSettings() {
-  const savedKey   = localStorage.getItem('proofreader_api_key') || '';
-  const savedModel = localStorage.getItem('proofreader_model') || 'gpt-4o';
-  apiKeyInput.value = savedKey;
+  // 最後に使ったサービスを復元
+  const lastService = localStorage.getItem('proofreader_service') || 'openai';
+  switchService(lastService);
 
-  if (!Array.from(modelSelect.options).find(o => o.value === savedModel)) {
-    const opt = document.createElement('option');
-    opt.value = savedModel;
-    opt.textContent = savedModel + '（保存済み）';
-    modelSelect.appendChild(opt);
-  }
-  modelSelect.value = savedModel;
+  // 各サービスの API キーとモデルを復元
+  ['openai', 'gemini', 'claude'].forEach(svc => {
+    const keyEl   = document.getElementById(`apikey-${svc}`);
+    const modelEl = document.getElementById(`model-${svc}`);
+    if (keyEl)   keyEl.value   = localStorage.getItem(`proofreader_apikey_${svc}`) || '';
+    if (modelEl) {
+      const saved = localStorage.getItem(`proofreader_model_${svc}`);
+      if (saved) {
+        // 保存済みモデルが選択肢にない場合は追加する
+        if (!Array.from(modelEl.options).find(o => o.value === saved)) {
+          const opt = document.createElement('option');
+          opt.value = saved;
+          opt.textContent = saved + '（保存済み）';
+          modelEl.appendChild(opt);
+        }
+        modelEl.value = saved;
+      }
+    }
+  });
 }
 
+// ===== サービス切り替え =====
+function switchService(svc) {
+  currentService = svc;
+
+  // タブのアクティブ状態を更新
+  document.querySelectorAll('.service-tab').forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.service === svc);
+  });
+
+  // パネルの表示を切り替え
+  ['openai', 'gemini', 'claude'].forEach(s => {
+    const panel = document.getElementById(`panel-${s}`);
+    if (panel) panel.style.display = s === svc ? 'block' : 'none';
+  });
+
+  updateProofreadBtnState();
+}
+
+// ===== 校正ボタンの有効/無効 =====
+function updateProofreadBtnState() {
+  const key = getActiveApiKey();
+  proofreadBtn.disabled = !key || key.length < 10;
+}
+
+// ===== 現在のサービスの API キーを取得 =====
+function getActiveApiKey() {
+  return localStorage.getItem(`proofreader_apikey_${currentService}`) ||
+         (document.getElementById(`apikey-${currentService}`)?.value.trim() || '');
+}
+
+// ===== 現在のサービスのモデルを取得 =====
+function getActiveModel() {
+  return document.getElementById(`model-${currentService}`)?.value || '';
+}
+
+// ===== イベントバインド =====
 function bindEvents() {
-  toggleKeyBtn.addEventListener('click', () => {
-    apiKeyInput.type = apiKeyInput.type === 'password' ? 'text' : 'password';
+  // サービスタブ切り替え
+  document.querySelectorAll('.service-tab').forEach(tab => {
+    tab.addEventListener('click', () => switchService(tab.dataset.service));
   });
 
-  saveSettingsBtn.addEventListener('click', () => {
-    const key = apiKeyInput.value.trim();
-    localStorage.setItem('proofreader_api_key', key);
-    localStorage.setItem('proofreader_model', modelSelect.value);
-    settingsSavedMsg.style.display = 'inline';
-    setTimeout(() => { settingsSavedMsg.style.display = 'none'; }, 2000);
-    proofreadBtn.disabled = key.length <= 10;
+  // API キー表示/非表示トグル
+  document.querySelectorAll('.toggle-key-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = document.getElementById(btn.dataset.target);
+      if (target) target.type = target.type === 'password' ? 'text' : 'password';
+    });
   });
 
-  apiKeyInput.addEventListener('input', () => {
-    proofreadBtn.disabled = apiKeyInput.value.trim().length <= 10;
+  // API キー入力時にボタン状態を更新
+  ['openai', 'gemini', 'claude'].forEach(svc => {
+    const keyEl = document.getElementById(`apikey-${svc}`);
+    if (keyEl) keyEl.addEventListener('input', updateProofreadBtnState);
   });
 
-  fetchModelsBtn.addEventListener('click', fetchAvailableModels);
+  // 設定保存
+  saveSettingsBtn.addEventListener('click', saveSettings);
+
+  // モデル取得ボタン
+  document.getElementById('fetch-models-openai').addEventListener('click', () => fetchModels('openai'));
+  document.getElementById('fetch-models-gemini').addEventListener('click', () => fetchModels('gemini'));
+  document.getElementById('fetch-models-claude').addEventListener('click', () => fetchModels('claude'));
+
+  // 校正実行
   proofreadBtn.addEventListener('click', runProofread);
 
+  // コピー
   copyBtn.addEventListener('click', () => {
     navigator.clipboard.writeText(resultsContent.innerText).then(() => {
       copyBtn.textContent = '✓ コピー済み';
@@ -118,64 +175,107 @@ function bindEvents() {
   });
 }
 
+// ===== 設定保存 =====
+function saveSettings() {
+  ['openai', 'gemini', 'claude'].forEach(svc => {
+    const keyEl   = document.getElementById(`apikey-${svc}`);
+    const modelEl = document.getElementById(`model-${svc}`);
+    if (keyEl)   localStorage.setItem(`proofreader_apikey_${svc}`, keyEl.value.trim());
+    if (modelEl) localStorage.setItem(`proofreader_model_${svc}`, modelEl.value);
+  });
+  localStorage.setItem('proofreader_service', currentService);
+  settingsSavedMsg.style.display = 'inline';
+  setTimeout(() => { settingsSavedMsg.style.display = 'none'; }, 2000);
+  updateProofreadBtnState();
+}
+
 // ===== モデル一覧取得 =====
-async function fetchAvailableModels() {
-  const apiKey = apiKeyInput.value.trim() || localStorage.getItem('proofreader_api_key') || '';
+async function fetchModels(svc) {
+  const keyEl    = document.getElementById(`apikey-${svc}`);
+  const modelEl  = document.getElementById(`model-${svc}`);
+  const hintEl   = document.getElementById(`hint-${svc}`);
+  const fetchBtn = document.getElementById(`fetch-models-${svc}`);
+  const apiKey   = keyEl?.value.trim() || localStorage.getItem(`proofreader_apikey_${svc}`) || '';
+
   if (apiKey.length < 10) {
-    modelHint.textContent = '先に API キーを入力してください。';
-    modelHint.style.color = '#c0392b';
+    hintEl.textContent = '先に API キーを入力してください。';
+    hintEl.style.color = '#c0392b';
     return;
   }
-  fetchModelsBtn.disabled = true;
-  fetchModelsBtn.textContent = '…';
-  modelHint.textContent = 'モデルを取得中...';
-  modelHint.style.color = '#666';
-  try {
-    const res = await fetch('https://api.openai.com/v1/models', {
-      headers: { 'Authorization': `Bearer ${apiKey}` }
-    });
-    if (!res.ok) {
-      const e = await res.json().catch(() => ({}));
-      throw new Error(e.error?.message || `HTTP ${res.status}`);
-    }
-    const data = await res.json();
-    const models = data.data
-      .filter(m => m.id.startsWith('gpt-'))
-      .map(m => m.id)
-      .sort((a, b) => b.localeCompare(a));
-    if (!models.length) throw new Error('利用可能な GPT モデルが見つかりませんでした。');
 
-    const cur = modelSelect.value;
-    modelSelect.innerHTML = '';
+  fetchBtn.disabled = true;
+  fetchBtn.textContent = '…';
+  hintEl.textContent = 'モデルを取得中...';
+  hintEl.style.color = '#666';
+
+  try {
+    let models = [];
+
+    if (svc === 'openai') {
+      const res = await fetch('https://api.openai.com/v1/models', {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error?.message || `HTTP ${res.status}`); }
+      const data = await res.json();
+      models = data.data
+        .filter(m => /^(gpt-|o1|o3|o4)/.test(m.id))
+        .map(m => m.id)
+        .sort((a, b) => b.localeCompare(a));
+
+    } else if (svc === 'gemini') {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error?.message || `HTTP ${res.status}`); }
+      const data = await res.json();
+      models = (data.models || [])
+        .filter(m => m.name.includes('gemini') && m.supportedGenerationMethods?.includes('generateContent'))
+        .map(m => m.name.replace('models/', ''))
+        .sort((a, b) => b.localeCompare(a));
+
+    } else if (svc === 'claude') {
+      const res = await fetch('https://api.anthropic.com/v1/models', {
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        }
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error?.message || `HTTP ${res.status}`); }
+      const data = await res.json();
+      models = (data.data || []).map(m => m.id).sort((a, b) => b.localeCompare(a));
+    }
+
+    if (!models.length) throw new Error('利用可能なモデルが見つかりませんでした。');
+
+    const cur = modelEl.value;
+    modelEl.innerHTML = '';
     const grp = document.createElement('optgroup');
     grp.label = `利用可能なモデル（${models.length} 件）`;
     models.forEach(id => {
       const opt = document.createElement('option');
-      opt.value = id;
-      opt.textContent = id;
+      opt.value = id; opt.textContent = id;
       grp.appendChild(opt);
     });
-    modelSelect.appendChild(grp);
-    modelSelect.value = models.includes(cur) ? cur : (models.find(m => m === 'gpt-4o') || models[0]);
+    modelEl.appendChild(grp);
+    modelEl.value = models.includes(cur) ? cur : models[0];
 
-    modelHint.textContent = `✓ ${models.length} 件取得しました。`;
-    modelHint.style.color = '#27ae60';
+    hintEl.textContent = `✓ ${models.length} 件取得しました。`;
+    hintEl.style.color = '#27ae60';
   } catch (err) {
-    modelHint.textContent = `取得失敗: ${err.message}`;
-    modelHint.style.color = '#c0392b';
+    hintEl.textContent = `取得失敗: ${err.message}`;
+    hintEl.style.color = '#c0392b';
   } finally {
-    fetchModelsBtn.disabled = false;
-    fetchModelsBtn.textContent = '↻';
+    fetchBtn.disabled = false;
+    fetchBtn.textContent = '↻';
   }
 }
 
 // ===== 校正実行 =====
 async function runProofread() {
-  const apiKey = localStorage.getItem('proofreader_api_key') || '';
-  const model  = modelSelect.value || 'gpt-4o';
+  const apiKey = getActiveApiKey();
+  const model  = getActiveModel();
 
-  if (apiKey.length < 10) {
-    showError('API キーが設定されていません。設定欄に OpenAI API キーを入力して保存してください。');
+  if (!apiKey || apiKey.length < 10) {
+    showError('API キーが設定されていません。設定欄に API キーを入力して保存してください。');
     return;
   }
 
@@ -187,17 +287,24 @@ async function runProofread() {
 
   try {
     const docText = await getDocumentText();
-    if (!docText || !docText.trim()) {
-      throw new Error('文書にテキストが見つかりませんでした。');
+    if (!docText || !docText.trim()) throw new Error('文書にテキストが見つかりませんでした。');
+
+    const serviceLabel = { openai: 'OpenAI', gemini: 'Gemini', claude: 'Claude' }[currentService];
+    setProgress(`${serviceLabel} (${model}) で校正中... お待ちください`);
+
+    let result = '';
+    if (currentService === 'openai') {
+      result = await callOpenAIStream(apiKey, model, docText);
+    } else if (currentService === 'gemini') {
+      result = await callGemini(apiKey, model, docText);
+    } else if (currentService === 'claude') {
+      result = await callClaudeStream(apiKey, model, docText);
     }
 
-    setProgress(`${model} で校正中... お待ちください`);
-
-    const result = await callOpenAIStream(apiKey, model, docText);
     displayResults(result, docText, model);
 
   } catch (err) {
-    showError(formatError(err));
+    showError(formatError(err, currentService));
   } finally {
     setLoading(false);
     progressArea.style.display = 'none';
@@ -220,21 +327,13 @@ function getDocumentText() {
   });
 }
 
-// ===== トークンパラメータの判定 =====
-// max_completion_tokens を使うモデル:
-//   - o1 / o3 / o4 系（推論モデル）
-//   - gpt-5 系（新世代モデル: gpt-5, gpt-5-mini, gpt-5.1, gpt-5.2 など）
-// それ以外（gpt-4o, gpt-4.1, gpt-3.5 など）は max_tokens を使う
+// ===== OpenAI: Chat Completions API (stream) =====
 function usesMaxCompletionTokens(model) {
   return /^(o1|o3|o4|gpt-5)/.test(model);
 }
 
-// ===== ストリーミング API 呼び出し =====
-// stream:true を使い、応答を少しずつ受信することでタイムアウトを回避する。
-// ブロック分割は行わず、文書全体を1回のリクエストで送信する。
 async function callOpenAIStream(apiKey, model, docText) {
   const userMsg = `以下の文書を校正してください。\n\n---\n${docText}\n---`;
-
   const useCompletionTokens = usesMaxCompletionTokens(model);
 
   const requestBody = {
@@ -245,13 +344,9 @@ async function callOpenAIStream(apiKey, model, docText) {
     ],
     stream: true,
   };
-
   if (useCompletionTokens) {
-    // gpt-5 系 / o1 / o3 / o4 系: max_completion_tokens を使用
-    // temperature は非対応のため設定しない
     requestBody.max_completion_tokens = 16384;
   } else {
-    // gpt-4o / gpt-4.1 / gpt-3.5 など: max_tokens を使用
     requestBody.max_tokens = 16384;
     requestBody.temperature = 0.2;
   }
@@ -270,7 +365,80 @@ async function callOpenAIStream(apiKey, model, docText) {
     throw new Error('OpenAI API エラー: ' + (errData.error?.message || `HTTP ${res.status}`));
   }
 
-  // SSE ストリームを読み取る
+  return readSSEStream(res, chunk => chunk.choices?.[0]?.delta?.content || '');
+}
+
+// ===== Gemini: generateContent API =====
+async function callGemini(apiKey, model, docText) {
+  const userMsg = `${SYSTEM_PROMPT}\n\n以下の文書を校正してください。\n\n---\n${docText}\n---`;
+
+  // Gemini は 2.5 Flash を推奨。ストリーミングは streamGenerateContent を使用
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
+
+  const requestBody = {
+    contents: [{ role: 'user', parts: [{ text: userMsg }] }],
+    generationConfig: {
+      maxOutputTokens: 16384,
+      temperature: 0.2,
+    },
+  };
+
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error('Gemini API エラー: ' + (errData.error?.message || `HTTP ${res.status}`));
+  }
+
+  return readSSEStream(res, chunk => {
+    // Gemini SSE レスポンス: candidates[0].content.parts[0].text
+    return chunk.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  });
+}
+
+// ===== Claude: Messages API (stream) =====
+async function callClaudeStream(apiKey, model, docText) {
+  const userMsg = `以下の文書を校正してください。\n\n---\n${docText}\n---`;
+
+  const requestBody = {
+    model,
+    max_tokens: 16384,
+    system: SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: userMsg }],
+    stream: true,
+  };
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error('Claude API エラー: ' + (errData.error?.message || `HTTP ${res.status}`));
+  }
+
+  // Claude SSE イベント: content_block_delta の delta.text
+  return readSSEStream(res, chunk => {
+    if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'text_delta') {
+      return chunk.delta.text || '';
+    }
+    return '';
+  });
+}
+
+// ===== 共通 SSE ストリーム読み取り =====
+async function readSSEStream(res, extractText) {
   const reader  = res.body.getReader();
   const decoder = new TextDecoder();
   let fullText = '';
@@ -291,11 +459,11 @@ async function callOpenAIStream(apiKey, model, docText) {
       if (!t.startsWith('data: ')) continue;
       try {
         const chunk = JSON.parse(t.slice(6));
-        const delta = chunk.choices?.[0]?.delta?.content;
+        const delta = extractText(chunk);
         if (delta) {
           fullText += delta;
           received += delta.length;
-          setProgress(`${model} で校正中... （${received} 字受信済み）`);
+          setProgress(`校正中... （${received} 字受信済み）`);
         }
       } catch (_) { /* 不完全チャンクは無視 */ }
     }
@@ -310,11 +478,16 @@ async function callOpenAIStream(apiKey, model, docText) {
 // ===== 結果表示 =====
 function displayResults(rawText, docText, model) {
   const now = new Date().toLocaleString('ja-JP');
+  const svcLabel = { openai: 'OpenAI', gemini: 'Gemini', claude: 'Claude' }[currentService];
+  const badgeClass = `badge badge-${currentService}`;
+
   resultsMeta.innerHTML =
-    `使用モデル: <strong>${model}</strong> ／ ` +
+    `<span class="${badgeClass}">${svcLabel}</span>` +
+    `モデル: <strong>${model}</strong> ／ ` +
     `文字数: <strong>${docText.length.toLocaleString()}</strong> 字 ／ ` +
     `行数: <strong>${docText.split('\n').length}</strong> 行 ／ ` +
     `実行日時: ${now}`;
+
   resultsContent.innerHTML = md2html(rawText);
   resultsSection.style.display = 'block';
   resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -335,15 +508,19 @@ function md2html(t) {
 }
 
 // ===== エラーフォーマット =====
-function formatError(err) {
+function formatError(err, svc) {
   const m = err.message || '';
-  if (m.includes('401'))                    return 'API キーが無効です。正しい OpenAI API キーを設定してください。';
-  if (m.includes('429'))                    return 'API のレート制限に達しました。しばらく待ってから再試行してください。';
-  if (m.includes('insufficient_quota'))     return 'OpenAI API の利用枠が不足しています。残高を確認してください。';
-  if (m.includes('does not have access') || m.includes('model_not_found'))
-    return `このモデルはご利用のプロジェクトで使用できません。↻ ボタンで利用可能なモデルを取得してください。\n\n詳細: ${m}`;
-  if (m.includes('max_tokens'))
+  if (m.includes('401') || m.includes('invalid_api_key') || m.includes('API_KEY_INVALID')) {
+    return `API キーが無効です。正しい ${svc === 'openai' ? 'OpenAI' : svc === 'gemini' ? 'Gemini' : 'Claude'} API キーを設定してください。`;
+  }
+  if (m.includes('429')) return 'API のレート制限に達しました。しばらく待ってから再試行してください。';
+  if (m.includes('insufficient_quota')) return 'API の利用枠が不足しています。残高を確認してください。';
+  if (m.includes('does not have access') || m.includes('model_not_found')) {
+    return `このモデルはご利用のプランで使用できません。↻ ボタンで利用可能なモデルを取得してください。\n\n詳細: ${m}`;
+  }
+  if (m.includes('max_tokens')) {
     return `トークンパラメータのエラーです。↻ ボタンでモデル一覧を再取得し、別のモデルを試してください。\n\n詳細: ${m}`;
+  }
   return m || '不明なエラーが発生しました。';
 }
 
