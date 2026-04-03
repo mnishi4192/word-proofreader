@@ -41,38 +41,16 @@ const SYSTEM_PROMPT = `このGPTは、編集者の視点から日本語文書を
 let currentService = 'openai'; // 'openai' | 'gemini' | 'claude' | 'lmstudio'
 const ALL_SERVICES = ['openai', 'gemini', 'claude', 'lmstudio'];
 
-// ===== DOM 要素キャッシュ =====
-let proofreadBtn, btnText, btnSpinner;
-let progressArea, progressText;
-let resultsSection, resultsMeta, resultsContent;
-let copyBtn, errorArea, errorMessage;
-let saveSettingsBtn, settingsSavedMsg;
+// ===== DOM ヘルパー（キャッシュなし・直接取得）=====
+const $ = id => document.getElementById(id);
 
 // ===== 初期化 =====
-Office.onReady(function (info) {
-  if (info.host === Office.HostType.Word) {
-    initDOM();
-    loadSettings();
-    bindEvents();
-    updateProofreadBtnState();
-  }
+Office.onReady(function () {
+  // host チェックを廃止: Word 以外の環境でも初期化できるようにする
+  loadSettings();
+  bindEvents();
+  updateProofreadBtnState();
 });
-
-function initDOM() {
-  proofreadBtn     = document.getElementById('proofread-btn');
-  btnText          = document.getElementById('btn-text');
-  btnSpinner       = document.getElementById('btn-spinner');
-  progressArea     = document.getElementById('progress-area');
-  progressText     = document.getElementById('progress-text');
-  resultsSection   = document.getElementById('results-section');
-  resultsMeta      = document.getElementById('results-meta');
-  resultsContent   = document.getElementById('results-content');
-  copyBtn          = document.getElementById('copy-btn');
-  errorArea        = document.getElementById('error-area');
-  errorMessage     = document.getElementById('error-message');
-  saveSettingsBtn  = document.getElementById('save-settings');
-  settingsSavedMsg = document.getElementById('settings-saved');
-}
 
 // ===== 設定の読み込み =====
 function loadSettings() {
@@ -124,6 +102,7 @@ function switchService(svc) {
 
 // ===== 校正ボタンの有効/無効 =====
 function updateProofreadBtnState() {
+  const proofreadBtn = $('proofread-btn');
   if (!proofreadBtn) return;
   if (currentService === 'lmstudio') {
     // LM Studio: エンドポイントとモデル名が入力されていれば有効
@@ -183,22 +162,24 @@ function bindEvents() {
   });
 
   // 設定保存
-  saveSettingsBtn.addEventListener('click', saveSettings);
+  $('save-settings')?.addEventListener('click', saveSettings);
 
   // モデル取得ボタン
-  document.getElementById('fetch-models-openai').addEventListener('click',   () => fetchModels('openai'));
-  document.getElementById('fetch-models-gemini').addEventListener('click',   () => fetchModels('gemini'));
-  document.getElementById('fetch-models-claude').addEventListener('click',   () => fetchModels('claude'));
-  document.getElementById('fetch-models-lmstudio').addEventListener('click', () => fetchModels('lmstudio'));
+  $('fetch-models-openai')?.addEventListener('click',   () => fetchModels('openai'));
+  $('fetch-models-gemini')?.addEventListener('click',   () => fetchModels('gemini'));
+  $('fetch-models-claude')?.addEventListener('click',   () => fetchModels('claude'));
+  $('fetch-models-lmstudio')?.addEventListener('click', () => fetchModels('lmstudio'));
 
   // 校正実行
-  proofreadBtn.addEventListener('click', runProofread);
+  $('proofread-btn')?.addEventListener('click', runProofread);
 
   // コピー
-  copyBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(resultsContent.innerText).then(() => {
-      copyBtn.textContent = '✓ コピー済み';
-      setTimeout(() => { copyBtn.textContent = 'コピー'; }, 2000);
+  $('copy-btn')?.addEventListener('click', () => {
+    const rc = $('results-content');
+    if (!rc) return;
+    navigator.clipboard.writeText(rc.innerText).then(() => {
+      const cb = $('copy-btn');
+      if (cb) { cb.textContent = '✓ コピー済み'; setTimeout(() => { cb.textContent = 'コピー'; }, 2000); }
     });
   });
 }
@@ -219,8 +200,8 @@ function saveSettings() {
   if (modelEl) localStorage.setItem('proofreader_model_lmstudio', modelEl.value.trim());
 
   localStorage.setItem('proofreader_service', currentService);
-  settingsSavedMsg.style.display = 'inline';
-  setTimeout(() => { settingsSavedMsg.style.display = 'none'; }, 2000);
+  const msg = $('settings-saved');
+  if (msg) { msg.style.display = 'inline'; setTimeout(() => { msg.style.display = 'none'; }, 2000); }
   updateProofreadBtnState();
 }
 
@@ -341,8 +322,8 @@ async function runProofread() {
 
   setLoading(true);
   hideError();
-  resultsSection.style.display = 'none';
-  progressArea.style.display = 'block';
+  $('results-section').style.display = 'none';
+  $('progress-area').style.display = 'block';
   setProgress('文書のテキストを取得中...');
 
   try {
@@ -369,7 +350,7 @@ async function runProofread() {
     showError(formatError(err, currentService));
   } finally {
     setLoading(false);
-    progressArea.style.display = 'none';
+    $('progress-area').style.display = 'none';
   }
 }
 
@@ -578,17 +559,19 @@ function displayResults(rawText, docText, model) {
   const now = new Date().toLocaleString('ja-JP');
   const svcLabel = { openai: 'OpenAI', gemini: 'Gemini', claude: 'Claude', lmstudio: 'LM Studio' }[currentService];
   const badgeClass = `badge badge-${currentService}`;
+  const rm = $('results-meta');
+  const rc = $('results-content');
+  const rs = $('results-section');
 
-  resultsMeta.innerHTML =
+  if (rm) rm.innerHTML =
     `<span class="${badgeClass}">${svcLabel}</span>` +
     `モデル: <strong>${model}</strong> ／ ` +
     `文字数: <strong>${docText.length.toLocaleString()}</strong> 字 ／ ` +
     `行数: <strong>${docText.split('\n').length}</strong> 行 ／ ` +
     `実行日時: ${now}`;
 
-  resultsContent.innerHTML = md2html(rawText);
-  resultsSection.style.display = 'block';
-  resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (rc) rc.innerHTML = md2html(rawText);
+  if (rs) { rs.style.display = 'block'; rs.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 }
 
 // ===== Markdown → HTML =====
@@ -625,10 +608,24 @@ function formatError(err, svc) {
 
 // ===== UI ヘルパー =====
 function setLoading(on) {
-  proofreadBtn.disabled    = on;
-  btnText.textContent      = on ? '校正中...' : '文書を校正する';
-  btnSpinner.style.display = on ? 'inline-block' : 'none';
+  const btn = $('proofread-btn');
+  const txt = $('btn-text');
+  const spn = $('btn-spinner');
+  if (btn) btn.disabled    = on;
+  if (txt) txt.textContent = on ? '校正中...' : '文書を校正する';
+  if (spn) spn.style.display = on ? 'inline-block' : 'none';
 }
-function setProgress(msg) { progressText.textContent = msg; }
-function showError(msg)    { errorMessage.textContent = msg; errorArea.style.display = 'block'; }
-function hideError()       { errorArea.style.display = 'none'; }
+function setProgress(msg) {
+  const el = $('progress-text');
+  if (el) el.textContent = msg;
+}
+function showError(msg) {
+  const em = $('error-message');
+  const ea = $('error-area');
+  if (em) em.textContent = msg;
+  if (ea) ea.style.display = 'block';
+}
+function hideError() {
+  const ea = $('error-area');
+  if (ea) ea.style.display = 'none';
+}
