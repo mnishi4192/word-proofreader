@@ -26,6 +26,7 @@
         <button class="service-tab active" data-service="openai">OpenAI</button>
         <button class="service-tab" data-service="gemini">Gemini</button>
         <button class="service-tab" data-service="claude">Claude</button>
+        <button class="service-tab" data-service="lmstudio">LM Studio</button>
       </div>
 
       <!-- OpenAI 設定 -->
@@ -80,6 +81,21 @@
           <button id="fetch-models-gemini" class="btn-icon" title="利用可能なモデルを取得">↻</button>
         </div>
         <div id="hint-gemini" class="hint"></div>
+      </div>
+
+      <!-- LM Studio 設定 -->
+      <div class="service-panel" id="panel-lmstudio" style="display:none">
+        <label class="label">サーバー URL</label>
+        <div class="input-row">
+          <input type="text" id="endpoint-lmstudio" placeholder="http://localhost:1234" autocomplete="off">
+        </div>
+        <p class="hint" style="margin-top:4px;">LM Studio の「Local Server」タブで起動したサーバーの URL を入力してください。</p>
+        <label class="label">モデル名</label>
+        <div class="input-row">
+          <input type="text" id="model-lmstudio" placeholder="モデル名（例: llama-3.2-3b-instruct）" autocomplete="off">
+          <button id="fetch-models-lmstudio" class="btn-icon" title="サーバーからモデル一覧を取得">↻</button>
+        </div>
+        <div id="hint-lmstudio" class="hint"></div>
       </div>
 
       <!-- Claude 設定 -->
