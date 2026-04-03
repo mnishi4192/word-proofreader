@@ -338,4 +338,3 @@ select:focus { border-color: #2c5f8a; }
 .badge-openai { background: #e8f4fd; color: #0d6efd; }
 .badge-gemini { background: #e8f8f0; color: #1a8a4a; }
 .badge-claude { background: #fdf0e8; color: #c05a00; }
-.badge-lmstudio { background: #f0f0ff; color: #5a2db8; }

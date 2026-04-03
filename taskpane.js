@@ -1,11 +1,10 @@
 /* =========================================================
-   文書校正アシスタント - taskpane.js (multi-service v10)
-   対応サービス: OpenAI / Gemini / Claude / LM Studio
-   - 各サービスの設定は localStorage に保存
+   文書校正アシスタント - taskpane.js (multi-service)
+   対応サービス: OpenAI / Gemini / Claude
+   - 各サービスの API キーはサービスごとに localStorage に保存
    - OpenAI: Chat Completions API + stream:true
-   - Gemini: streamGenerateContent API
+   - Gemini: generateContent API (gemini-2.5-flash 固定可)
    - Claude: Messages API + stream:true
-   - LM Studio: OpenAI 互換 API (ローカル) + stream:true
    ========================================================= */
 
 'use strict';
@@ -38,33 +37,56 @@ const SYSTEM_PROMPT = `このGPTは、編集者の視点から日本語文書を
 （文書全体の品質について簡潔に総評）`;
 
 // ===== 状態管理 =====
-let currentService = 'openai'; // 'openai' | 'gemini' | 'claude' | 'lmstudio'
-const ALL_SERVICES = ['openai', 'gemini', 'claude', 'lmstudio'];
+let currentService = 'openai'; // 'openai' | 'gemini' | 'claude'
 
-// ===== DOM ヘルパー（キャッシュなし・直接取得）=====
-const $ = id => document.getElementById(id);
+// ===== DOM 要素キャッシュ =====
+let proofreadBtn, btnText, btnSpinner;
+let progressArea, progressText;
+let resultsSection, resultsMeta, resultsContent;
+let copyBtn, errorArea, errorMessage;
+let saveSettingsBtn, settingsSavedMsg;
 
 // ===== 初期化 =====
-Office.onReady(function () {
-  // host チェックを廃止: Word 以外の環境でも初期化できるようにする
-  loadSettings();
-  bindEvents();
-  updateProofreadBtnState();
+Office.onReady(function (info) {
+  if (info.host === Office.HostType.Word) {
+    initDOM();
+    loadSettings();
+    bindEvents();
+    updateProofreadBtnState();
+  }
 });
+
+function initDOM() {
+  proofreadBtn     = document.getElementById('proofread-btn');
+  btnText          = document.getElementById('btn-text');
+  btnSpinner       = document.getElementById('btn-spinner');
+  progressArea     = document.getElementById('progress-area');
+  progressText     = document.getElementById('progress-text');
+  resultsSection   = document.getElementById('results-section');
+  resultsMeta      = document.getElementById('results-meta');
+  resultsContent   = document.getElementById('results-content');
+  copyBtn          = document.getElementById('copy-btn');
+  errorArea        = document.getElementById('error-area');
+  errorMessage     = document.getElementById('error-message');
+  saveSettingsBtn  = document.getElementById('save-settings');
+  settingsSavedMsg = document.getElementById('settings-saved');
+}
 
 // ===== 設定の読み込み =====
 function loadSettings() {
+  // 最後に使ったサービスを復元
   const lastService = localStorage.getItem('proofreader_service') || 'openai';
   switchService(lastService);
 
-  // OpenAI / Gemini / Claude: API キーとモデルを復元
+  // 各サービスの API キーとモデルを復元
   ['openai', 'gemini', 'claude'].forEach(svc => {
     const keyEl   = document.getElementById(`apikey-${svc}`);
     const modelEl = document.getElementById(`model-${svc}`);
-    if (keyEl)   keyEl.value = localStorage.getItem(`proofreader_apikey_${svc}`) || '';
+    if (keyEl)   keyEl.value   = localStorage.getItem(`proofreader_apikey_${svc}`) || '';
     if (modelEl) {
       const saved = localStorage.getItem(`proofreader_model_${svc}`);
       if (saved) {
+        // 保存済みモデルが選択肢にない場合は追加する
         if (!Array.from(modelEl.options).find(o => o.value === saved)) {
           const opt = document.createElement('option');
           opt.value = saved;
@@ -75,24 +97,19 @@ function loadSettings() {
       }
     }
   });
-
-  // LM Studio: エンドポイントとモデル名を復元
-  const epEl    = document.getElementById('endpoint-lmstudio');
-  const modelEl = document.getElementById('model-lmstudio');
-  if (epEl)    epEl.value    = localStorage.getItem('proofreader_endpoint_lmstudio') || 'http://localhost:1234';
-  if (modelEl) modelEl.value = localStorage.getItem('proofreader_model_lmstudio') || '';
 }
 
 // ===== サービス切り替え =====
 function switchService(svc) {
-  if (!ALL_SERVICES.includes(svc)) svc = 'openai';
   currentService = svc;
 
+  // タブのアクティブ状態を更新
   document.querySelectorAll('.service-tab').forEach(tab => {
     tab.classList.toggle('active', tab.dataset.service === svc);
   });
 
-  ALL_SERVICES.forEach(s => {
+  // パネルの表示を切り替え
+  ['openai', 'gemini', 'claude'].forEach(s => {
     const panel = document.getElementById(`panel-${s}`);
     if (panel) panel.style.display = s === svc ? 'block' : 'none';
   });
@@ -102,38 +119,19 @@ function switchService(svc) {
 
 // ===== 校正ボタンの有効/無効 =====
 function updateProofreadBtnState() {
-  const proofreadBtn = $('proofread-btn');
-  if (!proofreadBtn) return;
-  if (currentService === 'lmstudio') {
-    // LM Studio: エンドポイントとモデル名が入力されていれば有効
-    const ep    = (document.getElementById('endpoint-lmstudio')?.value || '').trim();
-    const model = (document.getElementById('model-lmstudio')?.value || '').trim();
-    proofreadBtn.disabled = !(ep && model);
-  } else {
-    const key = getActiveApiKey();
-    proofreadBtn.disabled = !key || key.length < 10;
-  }
+  const key = getActiveApiKey();
+  proofreadBtn.disabled = !key || key.length < 10;
 }
 
 // ===== 現在のサービスの API キーを取得 =====
 function getActiveApiKey() {
-  if (currentService === 'lmstudio') return 'lmstudio'; // ダミー（不要）
   return localStorage.getItem(`proofreader_apikey_${currentService}`) ||
          (document.getElementById(`apikey-${currentService}`)?.value.trim() || '');
 }
 
 // ===== 現在のサービスのモデルを取得 =====
 function getActiveModel() {
-  if (currentService === 'lmstudio') {
-    return document.getElementById('model-lmstudio')?.value.trim() || '';
-  }
   return document.getElementById(`model-${currentService}`)?.value || '';
-}
-
-// ===== LM Studio エンドポイントを取得 =====
-function getLMStudioEndpoint() {
-  const ep = (document.getElementById('endpoint-lmstudio')?.value || '').trim();
-  return ep.replace(/\/$/, ''); // 末尾スラッシュを除去
 }
 
 // ===== イベントバインド =====
@@ -151,35 +149,28 @@ function bindEvents() {
     });
   });
 
-  // API キー / エンドポイント / モデル入力時にボタン状態を更新
+  // API キー入力時にボタン状態を更新
   ['openai', 'gemini', 'claude'].forEach(svc => {
     const keyEl = document.getElementById(`apikey-${svc}`);
     if (keyEl) keyEl.addEventListener('input', updateProofreadBtnState);
   });
-  ['endpoint-lmstudio', 'model-lmstudio'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('input', updateProofreadBtnState);
-  });
 
   // 設定保存
-  $('save-settings')?.addEventListener('click', saveSettings);
+  saveSettingsBtn.addEventListener('click', saveSettings);
 
   // モデル取得ボタン
-  $('fetch-models-openai')?.addEventListener('click',   () => fetchModels('openai'));
-  $('fetch-models-gemini')?.addEventListener('click',   () => fetchModels('gemini'));
-  $('fetch-models-claude')?.addEventListener('click',   () => fetchModels('claude'));
-  $('fetch-models-lmstudio')?.addEventListener('click', () => fetchModels('lmstudio'));
+  document.getElementById('fetch-models-openai').addEventListener('click', () => fetchModels('openai'));
+  document.getElementById('fetch-models-gemini').addEventListener('click', () => fetchModels('gemini'));
+  document.getElementById('fetch-models-claude').addEventListener('click', () => fetchModels('claude'));
 
   // 校正実行
-  $('proofread-btn')?.addEventListener('click', runProofread);
+  proofreadBtn.addEventListener('click', runProofread);
 
   // コピー
-  $('copy-btn')?.addEventListener('click', () => {
-    const rc = $('results-content');
-    if (!rc) return;
-    navigator.clipboard.writeText(rc.innerText).then(() => {
-      const cb = $('copy-btn');
-      if (cb) { cb.textContent = '✓ コピー済み'; setTimeout(() => { cb.textContent = 'コピー'; }, 2000); }
+  copyBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(resultsContent.innerText).then(() => {
+      copyBtn.textContent = '✓ コピー済み';
+      setTimeout(() => { copyBtn.textContent = 'コピー'; }, 2000);
     });
   });
 }
@@ -192,23 +183,25 @@ function saveSettings() {
     if (keyEl)   localStorage.setItem(`proofreader_apikey_${svc}`, keyEl.value.trim());
     if (modelEl) localStorage.setItem(`proofreader_model_${svc}`, modelEl.value);
   });
-
-  // LM Studio 設定を保存
-  const epEl    = document.getElementById('endpoint-lmstudio');
-  const modelEl = document.getElementById('model-lmstudio');
-  if (epEl)    localStorage.setItem('proofreader_endpoint_lmstudio', epEl.value.trim());
-  if (modelEl) localStorage.setItem('proofreader_model_lmstudio', modelEl.value.trim());
-
   localStorage.setItem('proofreader_service', currentService);
-  const msg = $('settings-saved');
-  if (msg) { msg.style.display = 'inline'; setTimeout(() => { msg.style.display = 'none'; }, 2000); }
+  settingsSavedMsg.style.display = 'inline';
+  setTimeout(() => { settingsSavedMsg.style.display = 'none'; }, 2000);
   updateProofreadBtnState();
 }
 
 // ===== モデル一覧取得 =====
 async function fetchModels(svc) {
+  const keyEl    = document.getElementById(`apikey-${svc}`);
+  const modelEl  = document.getElementById(`model-${svc}`);
   const hintEl   = document.getElementById(`hint-${svc}`);
   const fetchBtn = document.getElementById(`fetch-models-${svc}`);
+  const apiKey   = keyEl?.value.trim() || localStorage.getItem(`proofreader_apikey_${svc}`) || '';
+
+  if (apiKey.length < 10) {
+    hintEl.textContent = '先に API キーを入力してください。';
+    hintEl.style.color = '#c0392b';
+    return;
+  }
 
   fetchBtn.disabled = true;
   fetchBtn.textContent = '…';
@@ -219,9 +212,6 @@ async function fetchModels(svc) {
     let models = [];
 
     if (svc === 'openai') {
-      const apiKey = (document.getElementById('apikey-openai')?.value.trim()) ||
-                     localStorage.getItem('proofreader_apikey_openai') || '';
-      if (apiKey.length < 10) throw new Error('先に API キーを入力してください。');
       const res = await fetch('https://api.openai.com/v1/models', {
         headers: { 'Authorization': `Bearer ${apiKey}` }
       });
@@ -233,9 +223,6 @@ async function fetchModels(svc) {
         .sort((a, b) => b.localeCompare(a));
 
     } else if (svc === 'gemini') {
-      const apiKey = (document.getElementById('apikey-gemini')?.value.trim()) ||
-                     localStorage.getItem('proofreader_apikey_gemini') || '';
-      if (apiKey.length < 10) throw new Error('先に API キーを入力してください。');
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error?.message || `HTTP ${res.status}`); }
       const data = await res.json();
@@ -245,9 +232,6 @@ async function fetchModels(svc) {
         .sort((a, b) => b.localeCompare(a));
 
     } else if (svc === 'claude') {
-      const apiKey = (document.getElementById('apikey-claude')?.value.trim()) ||
-                     localStorage.getItem('proofreader_apikey_claude') || '';
-      if (apiKey.length < 10) throw new Error('先に API キーを入力してください。');
       const res = await fetch('https://api.anthropic.com/v1/models', {
         headers: {
           'x-api-key': apiKey,
@@ -258,41 +242,24 @@ async function fetchModels(svc) {
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error?.message || `HTTP ${res.status}`); }
       const data = await res.json();
       models = (data.data || []).map(m => m.id).sort((a, b) => b.localeCompare(a));
-
-    } else if (svc === 'lmstudio') {
-      // LM Studio: OpenAI 互換の /v1/models エンドポイントを使用
-      const ep = getLMStudioEndpoint();
-      if (!ep) throw new Error('先にサーバー URL を入力してください。');
-      const res = await fetch(`${ep}/v1/models`);
-      if (!res.ok) throw new Error(`サーバーに接続できませんでした (HTTP ${res.status})。LM Studio のローカルサーバーが起動しているか確認してください。`);
-      const data = await res.json();
-      models = (data.data || []).map(m => m.id).sort();
     }
 
     if (!models.length) throw new Error('利用可能なモデルが見つかりませんでした。');
 
-    if (svc === 'lmstudio') {
-      // LM Studio はテキスト入力欄なので、最初のモデルを自動入力
-      const modelEl = document.getElementById('model-lmstudio');
-      if (modelEl && !modelEl.value) modelEl.value = models[0];
-      hintEl.textContent = `✓ ${models.length} 件取得: ${models.join(', ')}`;
-    } else {
-      const modelEl = document.getElementById(`model-${svc}`);
-      const cur = modelEl.value;
-      modelEl.innerHTML = '';
-      const grp = document.createElement('optgroup');
-      grp.label = `利用可能なモデル（${models.length} 件）`;
-      models.forEach(id => {
-        const opt = document.createElement('option');
-        opt.value = id; opt.textContent = id;
-        grp.appendChild(opt);
-      });
-      modelEl.appendChild(grp);
-      modelEl.value = models.includes(cur) ? cur : models[0];
-      hintEl.textContent = `✓ ${models.length} 件取得しました。`;
-    }
-    hintEl.style.color = '#27ae60';
+    const cur = modelEl.value;
+    modelEl.innerHTML = '';
+    const grp = document.createElement('optgroup');
+    grp.label = `利用可能なモデル（${models.length} 件）`;
+    models.forEach(id => {
+      const opt = document.createElement('option');
+      opt.value = id; opt.textContent = id;
+      grp.appendChild(opt);
+    });
+    modelEl.appendChild(grp);
+    modelEl.value = models.includes(cur) ? cur : models[0];
 
+    hintEl.textContent = `✓ ${models.length} 件取得しました。`;
+    hintEl.style.color = '#27ae60';
   } catch (err) {
     hintEl.textContent = `取得失敗: ${err.message}`;
     hintEl.style.color = '#c0392b';
@@ -304,44 +271,34 @@ async function fetchModels(svc) {
 
 // ===== 校正実行 =====
 async function runProofread() {
-  const model = getActiveModel();
+  const apiKey = getActiveApiKey();
+  const model  = getActiveModel();
 
-  if (currentService === 'lmstudio') {
-    const ep = getLMStudioEndpoint();
-    if (!ep || !model) {
-      showError('サーバー URL とモデル名を入力してください。');
-      return;
-    }
-  } else {
-    const apiKey = getActiveApiKey();
-    if (!apiKey || apiKey.length < 10) {
-      showError('API キーが設定されていません。設定欄に API キーを入力して保存してください。');
-      return;
-    }
+  if (!apiKey || apiKey.length < 10) {
+    showError('API キーが設定されていません。設定欄に API キーを入力して保存してください。');
+    return;
   }
 
   setLoading(true);
   hideError();
-  $('results-section').style.display = 'none';
-  $('progress-area').style.display = 'block';
+  resultsSection.style.display = 'none';
+  progressArea.style.display = 'block';
   setProgress('文書のテキストを取得中...');
 
   try {
     const docText = await getDocumentText();
     if (!docText || !docText.trim()) throw new Error('文書にテキストが見つかりませんでした。');
 
-    const serviceLabel = { openai: 'OpenAI', gemini: 'Gemini', claude: 'Claude', lmstudio: 'LM Studio' }[currentService];
+    const serviceLabel = { openai: 'OpenAI', gemini: 'Gemini', claude: 'Claude' }[currentService];
     setProgress(`${serviceLabel} (${model}) で校正中... お待ちください`);
 
     let result = '';
     if (currentService === 'openai') {
-      result = await callOpenAIStream(getActiveApiKey(), model, docText);
+      result = await callOpenAIStream(apiKey, model, docText);
     } else if (currentService === 'gemini') {
-      result = await callGemini(getActiveApiKey(), model, docText);
+      result = await callGemini(apiKey, model, docText);
     } else if (currentService === 'claude') {
-      result = await callClaudeStream(getActiveApiKey(), model, docText);
-    } else if (currentService === 'lmstudio') {
-      result = await callLMStudioStream(getLMStudioEndpoint(), model, docText);
+      result = await callClaudeStream(apiKey, model, docText);
     }
 
     displayResults(result, docText, model);
@@ -350,7 +307,7 @@ async function runProofread() {
     showError(formatError(err, currentService));
   } finally {
     setLoading(false);
-    $('progress-area').style.display = 'none';
+    progressArea.style.display = 'none';
   }
 }
 
@@ -372,7 +329,6 @@ function getDocumentText() {
 
 // ===== OpenAI: Chat Completions API (stream) =====
 function usesMaxCompletionTokens(model) {
-  // o1/o3/o4 系および gpt-5 系は max_completion_tokens を使用
   return /^(o1|o3|o4|gpt-5)/.test(model);
 }
 
@@ -412,9 +368,11 @@ async function callOpenAIStream(apiKey, model, docText) {
   return readSSEStream(res, chunk => chunk.choices?.[0]?.delta?.content || '');
 }
 
-// ===== Gemini: streamGenerateContent API =====
+// ===== Gemini: generateContent API =====
 async function callGemini(apiKey, model, docText) {
   const userMsg = `${SYSTEM_PROMPT}\n\n以下の文書を校正してください。\n\n---\n${docText}\n---`;
+
+  // Gemini は 2.5 Flash を推奨。ストリーミングは streamGenerateContent を使用
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
 
   const requestBody = {
@@ -436,7 +394,10 @@ async function callGemini(apiKey, model, docText) {
     throw new Error('Gemini API エラー: ' + (errData.error?.message || `HTTP ${res.status}`));
   }
 
-  return readSSEStream(res, chunk => chunk.candidates?.[0]?.content?.parts?.[0]?.text || '');
+  return readSSEStream(res, chunk => {
+    // Gemini SSE レスポンス: candidates[0].content.parts[0].text
+    return chunk.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  });
 }
 
 // ===== Claude: Messages API (stream) =====
@@ -467,53 +428,13 @@ async function callClaudeStream(apiKey, model, docText) {
     throw new Error('Claude API エラー: ' + (errData.error?.message || `HTTP ${res.status}`));
   }
 
+  // Claude SSE イベント: content_block_delta の delta.text
   return readSSEStream(res, chunk => {
     if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'text_delta') {
       return chunk.delta.text || '';
     }
     return '';
   });
-}
-
-// ===== LM Studio: OpenAI 互換 API (stream) =====
-async function callLMStudioStream(endpoint, model, docText) {
-  const userMsg = `以下の文書を校正してください。\n\n---\n${docText}\n---`;
-
-  const requestBody = {
-    model,
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user',   content: userMsg },
-    ],
-    max_tokens: 16384,
-    temperature: 0.2,
-    stream: true,
-  };
-
-  let res;
-  try {
-    res = await fetch(`${endpoint}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-    });
-  } catch (e) {
-    throw new Error(
-      `LM Studio サーバーに接続できませんでした。\n` +
-      `・LM Studio の「Local Server」タブでサーバーが起動しているか確認してください。\n` +
-      `・URL が正しいか確認してください（現在: ${endpoint}）\n` +
-      `・Mac の場合、Word アドインは HTTPS 経由でのみ外部通信できるため、` +
-      `LM Studio サーバーに HTTPS でアクセスできる設定が必要な場合があります。\n\n` +
-      `詳細: ${e.message}`
-    );
-  }
-
-  if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error('LM Studio エラー: ' + (errData.error?.message || `HTTP ${res.status}`));
-  }
-
-  return readSSEStream(res, chunk => chunk.choices?.[0]?.delta?.content || '');
 }
 
 // ===== 共通 SSE ストリーム読み取り =====
@@ -530,7 +451,7 @@ async function readSSEStream(res, extractText) {
 
     buf += decoder.decode(value, { stream: true });
     const lines = buf.split('\n');
-    buf = lines.pop();
+    buf = lines.pop(); // 末尾の不完全行はバッファへ
 
     for (const line of lines) {
       const t = line.trim();
@@ -557,21 +478,19 @@ async function readSSEStream(res, extractText) {
 // ===== 結果表示 =====
 function displayResults(rawText, docText, model) {
   const now = new Date().toLocaleString('ja-JP');
-  const svcLabel = { openai: 'OpenAI', gemini: 'Gemini', claude: 'Claude', lmstudio: 'LM Studio' }[currentService];
+  const svcLabel = { openai: 'OpenAI', gemini: 'Gemini', claude: 'Claude' }[currentService];
   const badgeClass = `badge badge-${currentService}`;
-  const rm = $('results-meta');
-  const rc = $('results-content');
-  const rs = $('results-section');
 
-  if (rm) rm.innerHTML =
+  resultsMeta.innerHTML =
     `<span class="${badgeClass}">${svcLabel}</span>` +
     `モデル: <strong>${model}</strong> ／ ` +
     `文字数: <strong>${docText.length.toLocaleString()}</strong> 字 ／ ` +
     `行数: <strong>${docText.split('\n').length}</strong> 行 ／ ` +
     `実行日時: ${now}`;
 
-  if (rc) rc.innerHTML = md2html(rawText);
-  if (rs) { rs.style.display = 'block'; rs.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  resultsContent.innerHTML = md2html(rawText);
+  resultsSection.style.display = 'block';
+  resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // ===== Markdown → HTML =====
@@ -592,8 +511,7 @@ function md2html(t) {
 function formatError(err, svc) {
   const m = err.message || '';
   if (m.includes('401') || m.includes('invalid_api_key') || m.includes('API_KEY_INVALID')) {
-    const label = { openai: 'OpenAI', gemini: 'Gemini', claude: 'Claude', lmstudio: 'LM Studio' }[svc];
-    return `API キーが無効です。正しい ${label} API キーを設定してください。`;
+    return `API キーが無効です。正しい ${svc === 'openai' ? 'OpenAI' : svc === 'gemini' ? 'Gemini' : 'Claude'} API キーを設定してください。`;
   }
   if (m.includes('429')) return 'API のレート制限に達しました。しばらく待ってから再試行してください。';
   if (m.includes('insufficient_quota')) return 'API の利用枠が不足しています。残高を確認してください。';
@@ -608,24 +526,10 @@ function formatError(err, svc) {
 
 // ===== UI ヘルパー =====
 function setLoading(on) {
-  const btn = $('proofread-btn');
-  const txt = $('btn-text');
-  const spn = $('btn-spinner');
-  if (btn) btn.disabled    = on;
-  if (txt) txt.textContent = on ? '校正中...' : '文書を校正する';
-  if (spn) spn.style.display = on ? 'inline-block' : 'none';
+  proofreadBtn.disabled    = on;
+  btnText.textContent      = on ? '校正中...' : '文書を校正する';
+  btnSpinner.style.display = on ? 'inline-block' : 'none';
 }
-function setProgress(msg) {
-  const el = $('progress-text');
-  if (el) el.textContent = msg;
-}
-function showError(msg) {
-  const em = $('error-message');
-  const ea = $('error-area');
-  if (em) em.textContent = msg;
-  if (ea) ea.style.display = 'block';
-}
-function hideError() {
-  const ea = $('error-area');
-  if (ea) ea.style.display = 'none';
-}
+function setProgress(msg) { progressText.textContent = msg; }
+function showError(msg)    { errorMessage.textContent = msg; errorArea.style.display = 'block'; }
+function hideError()       { errorArea.style.display = 'none'; }
