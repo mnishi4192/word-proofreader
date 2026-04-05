@@ -4,7 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>文書校正アシスタント</title>
-  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <!-- office.js はローカルの Caddy から配信（インターネット接続不要） -->
+  <script src="/office.js"></script>
   <link rel="stylesheet" href="taskpane.css">
 </head>
 <body>
@@ -26,6 +27,7 @@
         <button class="service-tab active" data-service="openai">OpenAI</button>
         <button class="service-tab" data-service="gemini">Gemini</button>
         <button class="service-tab" data-service="claude">Claude</button>
+        <button class="service-tab" data-service="ollama">Ollama</button>
       </div>
 
       <!-- OpenAI 設定 -->
@@ -111,6 +113,32 @@
           <button id="fetch-models-claude" class="btn-icon" title="利用可能なモデルを取得">↻</button>
         </div>
         <div id="hint-claude" class="hint"></div>
+      </div>
+
+      <!-- Ollama 設定 -->
+      <div class="service-panel" id="panel-ollama" style="display:none">
+        <div class="ollama-notice">
+          <strong>ローカル LLM（クラウド不使用）</strong><br>
+          Ollama を起動し、Caddy の Ollama プロキシポート（デフォルト: 11435）を入力してください。
+          アドイン本体も Caddy から配信されるため、全てローカルで完結します。
+        </div>
+        <label class="label">Ollama サーバー URL</label>
+        <div class="input-row">
+          <input type="text" id="serverurl-ollama" placeholder="https://localhost:11435" autocomplete="off">
+        </div>
+        <label class="label">モデル</label>
+        <div class="input-row">
+          <select id="model-ollama">
+            <option value="" disabled selected>↻ ボタンでモデルを取得してください</option>
+          </select>
+          <button id="fetch-models-ollama" class="btn-icon" title="Ollama からモデル一覧を取得">↻</button>
+        </div>
+        <div id="hint-ollama" class="hint"></div>
+        <div class="ollama-status-row">
+          <span id="ollama-status-dot" class="status-dot status-unknown"></span>
+          <span id="ollama-status-text" class="status-text">未確認</span>
+          <button id="ollama-check-btn" class="btn-small">接続確認</button>
+        </div>
       </div>
 
       <div class="btn-row">

@@ -1,10 +1,13 @@
 /* =========================================================
-   文書校正アシスタント - taskpane.js (multi-service)
-   対応サービス: OpenAI / Gemini / Claude
-   - 各サービスの API キーはサービスごとに localStorage に保存
+   文書校正アシスタント - taskpane.js (multi-service + Ollama)
+   対応サービス: OpenAI / Gemini / Claude / Ollama（ローカル LLM）
+   - 各サービスの設定は localStorage に保存
    - OpenAI: Chat Completions API + stream:true
-   - Gemini: generateContent API (gemini-2.5-flash 固定可)
+   - Gemini: streamGenerateContent API (SSE)
    - Claude: Messages API + stream:true
+   - Ollama: OpenAI 互換 /v1/chat/completions + stream:true
+             ※ Word アドインは HTTPS 配信のため HTTP localhost には
+               直接接続不可。ngrok 等で HTTPS 化した URL を使用する。
    ========================================================= */
 
 'use strict';
@@ -37,40 +40,17 @@ const SYSTEM_PROMPT = `このGPTは、編集者の視点から日本語文書を
 （文書全体の品質について簡潔に総評）`;
 
 // ===== 状態管理 =====
-let currentService = 'openai'; // 'openai' | 'gemini' | 'claude'
+let currentService = 'openai'; // 'openai' | 'gemini' | 'claude' | 'ollama'
 
-// ===== DOM 要素キャッシュ =====
-let proofreadBtn, btnText, btnSpinner;
-let progressArea, progressText;
-let resultsSection, resultsMeta, resultsContent;
-let copyBtn, errorArea, errorMessage;
-let saveSettingsBtn, settingsSavedMsg;
+// ===== 全サービス一覧 =====
+const ALL_SERVICES = ['openai', 'gemini', 'claude', 'ollama'];
 
 // ===== 初期化 =====
-Office.onReady(function (info) {
-  if (info.host === Office.HostType.Word) {
-    initDOM();
-    loadSettings();
-    bindEvents();
-    updateProofreadBtnState();
-  }
+Office.onReady(function () {
+  loadSettings();
+  bindEvents();
+  updateProofreadBtnState();
 });
-
-function initDOM() {
-  proofreadBtn     = document.getElementById('proofread-btn');
-  btnText          = document.getElementById('btn-text');
-  btnSpinner       = document.getElementById('btn-spinner');
-  progressArea     = document.getElementById('progress-area');
-  progressText     = document.getElementById('progress-text');
-  resultsSection   = document.getElementById('results-section');
-  resultsMeta      = document.getElementById('results-meta');
-  resultsContent   = document.getElementById('results-content');
-  copyBtn          = document.getElementById('copy-btn');
-  errorArea        = document.getElementById('error-area');
-  errorMessage     = document.getElementById('error-message');
-  saveSettingsBtn  = document.getElementById('save-settings');
-  settingsSavedMsg = document.getElementById('settings-saved');
-}
 
 // ===== 設定の読み込み =====
 function loadSettings() {
@@ -78,7 +58,7 @@ function loadSettings() {
   const lastService = localStorage.getItem('proofreader_service') || 'openai';
   switchService(lastService);
 
-  // 各サービスの API キーとモデルを復元
+  // クラウドサービスの API キーとモデルを復元
   ['openai', 'gemini', 'claude'].forEach(svc => {
     const keyEl   = document.getElementById(`apikey-${svc}`);
     const modelEl = document.getElementById(`model-${svc}`);
@@ -86,7 +66,6 @@ function loadSettings() {
     if (modelEl) {
       const saved = localStorage.getItem(`proofreader_model_${svc}`);
       if (saved) {
-        // 保存済みモデルが選択肢にない場合は追加する
         if (!Array.from(modelEl.options).find(o => o.value === saved)) {
           const opt = document.createElement('option');
           opt.value = saved;
@@ -97,10 +76,31 @@ function loadSettings() {
       }
     }
   });
+
+  // Ollama 設定を復元
+  const ollamaUrl = localStorage.getItem('proofreader_serverurl_ollama') || '';
+  const ollamaModel = localStorage.getItem('proofreader_model_ollama') || '';
+  const urlEl = document.getElementById('serverurl-ollama');
+  if (urlEl) urlEl.value = ollamaUrl;
+
+  if (ollamaModel) {
+    const modelEl = document.getElementById('model-ollama');
+    if (modelEl) {
+      // 保存済みモデルを選択肢に追加して選択
+      if (!Array.from(modelEl.options).find(o => o.value === ollamaModel)) {
+        const opt = document.createElement('option');
+        opt.value = ollamaModel;
+        opt.textContent = ollamaModel + '（保存済み）';
+        modelEl.appendChild(opt);
+      }
+      modelEl.value = ollamaModel;
+    }
+  }
 }
 
 // ===== サービス切り替え =====
 function switchService(svc) {
+  if (!ALL_SERVICES.includes(svc)) svc = 'openai';
   currentService = svc;
 
   // タブのアクティブ状態を更新
@@ -109,7 +109,7 @@ function switchService(svc) {
   });
 
   // パネルの表示を切り替え
-  ['openai', 'gemini', 'claude'].forEach(s => {
+  ALL_SERVICES.forEach(s => {
     const panel = document.getElementById(`panel-${s}`);
     if (panel) panel.style.display = s === svc ? 'block' : 'none';
   });
@@ -119,12 +119,22 @@ function switchService(svc) {
 
 // ===== 校正ボタンの有効/無効 =====
 function updateProofreadBtnState() {
-  const key = getActiveApiKey();
-  proofreadBtn.disabled = !key || key.length < 10;
+  const btn = document.getElementById('proofread-btn');
+  if (!btn) return;
+
+  if (currentService === 'ollama') {
+    const url   = getOllamaUrl();
+    const model = document.getElementById('model-ollama')?.value || '';
+    btn.disabled = !url || !model || model === '';
+  } else {
+    const key = getActiveApiKey();
+    btn.disabled = !key || key.length < 10;
+  }
 }
 
-// ===== 現在のサービスの API キーを取得 =====
+// ===== 現在のサービスの API キーを取得（Ollama は不要） =====
 function getActiveApiKey() {
+  if (currentService === 'ollama') return 'ollama'; // ダミー（使わない）
   return localStorage.getItem(`proofreader_apikey_${currentService}`) ||
          (document.getElementById(`apikey-${currentService}`)?.value.trim() || '');
 }
@@ -132,6 +142,13 @@ function getActiveApiKey() {
 // ===== 現在のサービスのモデルを取得 =====
 function getActiveModel() {
   return document.getElementById(`model-${currentService}`)?.value || '';
+}
+
+// ===== Ollama サーバー URL を取得（末尾スラッシュを除去） =====
+function getOllamaUrl() {
+  const raw = localStorage.getItem('proofreader_serverurl_ollama') ||
+              document.getElementById('serverurl-ollama')?.value.trim() || '';
+  return raw.replace(/\/+$/, '');
 }
 
 // ===== イベントバインド =====
@@ -155,41 +172,79 @@ function bindEvents() {
     if (keyEl) keyEl.addEventListener('input', updateProofreadBtnState);
   });
 
-  // 設定保存
-  saveSettingsBtn.addEventListener('click', saveSettings);
+  // Ollama URL / モデル変更時にボタン状態を更新
+  const ollamaUrlEl   = document.getElementById('serverurl-ollama');
+  const ollamaModelEl = document.getElementById('model-ollama');
+  if (ollamaUrlEl)   ollamaUrlEl.addEventListener('input', updateProofreadBtnState);
+  if (ollamaModelEl) ollamaModelEl.addEventListener('change', updateProofreadBtnState);
 
-  // モデル取得ボタン
+  // 設定保存
+  document.getElementById('save-settings').addEventListener('click', saveSettings);
+
+  // モデル取得ボタン（クラウド）
   document.getElementById('fetch-models-openai').addEventListener('click', () => fetchModels('openai'));
   document.getElementById('fetch-models-gemini').addEventListener('click', () => fetchModels('gemini'));
   document.getElementById('fetch-models-claude').addEventListener('click', () => fetchModels('claude'));
 
+  // Ollama モデル取得ボタン
+  document.getElementById('fetch-models-ollama').addEventListener('click', fetchOllamaModels);
+
+  // Ollama 接続確認ボタン
+  document.getElementById('ollama-check-btn').addEventListener('click', checkOllamaConnection);
+
+  // Ollama ヘルプトグル
+  document.getElementById('ollama-help-link').addEventListener('click', e => {
+    e.preventDefault();
+    const detail = document.getElementById('ollama-help-detail');
+    const link   = document.getElementById('ollama-help-link');
+    if (detail.style.display === 'none') {
+      detail.style.display = 'block';
+      link.textContent = '接続方法を閉じる ▲';
+    } else {
+      detail.style.display = 'none';
+      link.textContent = '接続方法を確認 ▼';
+    }
+  });
+
   // 校正実行
-  proofreadBtn.addEventListener('click', runProofread);
+  document.getElementById('proofread-btn').addEventListener('click', runProofread);
 
   // コピー
-  copyBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(resultsContent.innerText).then(() => {
-      copyBtn.textContent = '✓ コピー済み';
-      setTimeout(() => { copyBtn.textContent = 'コピー'; }, 2000);
+  document.getElementById('copy-btn').addEventListener('click', () => {
+    const rc = document.getElementById('results-content');
+    navigator.clipboard.writeText(rc.innerText).then(() => {
+      const btn = document.getElementById('copy-btn');
+      btn.textContent = '✓ コピー済み';
+      setTimeout(() => { btn.textContent = 'コピー'; }, 2000);
     });
   });
 }
 
 // ===== 設定保存 =====
 function saveSettings() {
+  // クラウドサービス
   ['openai', 'gemini', 'claude'].forEach(svc => {
     const keyEl   = document.getElementById(`apikey-${svc}`);
     const modelEl = document.getElementById(`model-${svc}`);
     if (keyEl)   localStorage.setItem(`proofreader_apikey_${svc}`, keyEl.value.trim());
     if (modelEl) localStorage.setItem(`proofreader_model_${svc}`, modelEl.value);
   });
+
+  // Ollama
+  const ollamaUrlEl   = document.getElementById('serverurl-ollama');
+  const ollamaModelEl = document.getElementById('model-ollama');
+  if (ollamaUrlEl)   localStorage.setItem('proofreader_serverurl_ollama', ollamaUrlEl.value.trim().replace(/\/+$/, ''));
+  if (ollamaModelEl) localStorage.setItem('proofreader_model_ollama', ollamaModelEl.value);
+
   localStorage.setItem('proofreader_service', currentService);
-  settingsSavedMsg.style.display = 'inline';
-  setTimeout(() => { settingsSavedMsg.style.display = 'none'; }, 2000);
+
+  const msg = document.getElementById('settings-saved');
+  msg.style.display = 'inline';
+  setTimeout(() => { msg.style.display = 'none'; }, 2000);
   updateProofreadBtnState();
 }
 
-// ===== モデル一覧取得 =====
+// ===== クラウドサービス: モデル一覧取得 =====
 async function fetchModels(svc) {
   const keyEl    = document.getElementById(`apikey-${svc}`);
   const modelEl  = document.getElementById(`model-${svc}`);
@@ -269,15 +324,126 @@ async function fetchModels(svc) {
   }
 }
 
-// ===== 校正実行 =====
-async function runProofread() {
-  const apiKey = getActiveApiKey();
-  const model  = getActiveModel();
+// ===== Ollama: モデル一覧取得 =====
+async function fetchOllamaModels() {
+  const hintEl   = document.getElementById('hint-ollama');
+  const modelEl  = document.getElementById('model-ollama');
+  const fetchBtn = document.getElementById('fetch-models-ollama');
+  const baseUrl  = document.getElementById('serverurl-ollama')?.value.trim().replace(/\/+$/, '') || '';
 
-  if (!apiKey || apiKey.length < 10) {
-    showError('API キーが設定されていません。設定欄に API キーを入力して保存してください。');
+  if (!baseUrl) {
+    hintEl.textContent = '先にサーバー URL を入力してください。';
+    hintEl.style.color = '#c0392b';
     return;
   }
+
+  fetchBtn.disabled = true;
+  fetchBtn.textContent = '…';
+  hintEl.textContent = 'モデルを取得中...';
+  hintEl.style.color = '#666';
+
+  try {
+    // Ollama OpenAI 互換エンドポイント: GET /v1/models
+    const res = await fetch(`${baseUrl}/v1/models`, {
+      headers: { 'Authorization': 'Bearer ollama' }
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    const models = (data.data || []).map(m => m.id).sort();
+    if (!models.length) throw new Error('インストール済みモデルが見つかりませんでした。\nOllama で `ollama pull <モデル名>` を実行してください。');
+
+    const cur = modelEl.value;
+    modelEl.innerHTML = '';
+    const grp = document.createElement('optgroup');
+    grp.label = `インストール済みモデル（${models.length} 件）`;
+    models.forEach(id => {
+      const opt = document.createElement('option');
+      opt.value = id; opt.textContent = id;
+      grp.appendChild(opt);
+    });
+    modelEl.appendChild(grp);
+    modelEl.value = models.includes(cur) ? cur : models[0];
+
+    hintEl.textContent = `✓ ${models.length} 件取得しました。`;
+    hintEl.style.color = '#27ae60';
+    updateProofreadBtnState();
+    setOllamaStatus('ok', '接続 OK');
+  } catch (err) {
+    hintEl.textContent = `取得失敗: ${err.message}`;
+    hintEl.style.color = '#c0392b';
+    setOllamaStatus('error', '接続失敗');
+  } finally {
+    fetchBtn.disabled = false;
+    fetchBtn.textContent = '↻';
+  }
+}
+
+// ===== Ollama: 接続確認 =====
+async function checkOllamaConnection() {
+  const baseUrl = document.getElementById('serverurl-ollama')?.value.trim().replace(/\/+$/, '') || '';
+  const hintEl  = document.getElementById('hint-ollama');
+
+  if (!baseUrl) {
+    hintEl.textContent = 'サーバー URL を入力してください。';
+    hintEl.style.color = '#c0392b';
+    return;
+  }
+
+  setOllamaStatus('checking', '確認中...');
+  hintEl.textContent = '接続を確認中...';
+  hintEl.style.color = '#666';
+
+  try {
+    const res = await fetch(`${baseUrl}/v1/models`, {
+      headers: { 'Authorization': 'Bearer ollama' }
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await res.json();
+    setOllamaStatus('ok', '接続 OK');
+    hintEl.textContent = '✓ Ollama サーバーに接続できました。↻ でモデルを取得してください。';
+    hintEl.style.color = '#27ae60';
+  } catch (err) {
+    setOllamaStatus('error', '接続失敗');
+    hintEl.textContent = `接続失敗: ${err.message}\nURL が正しいか、Ollama が起動しているか確認してください。`;
+    hintEl.style.color = '#c0392b';
+  }
+}
+
+// ===== Ollama: 接続ステータス表示 =====
+function setOllamaStatus(state, text) {
+  const dot  = document.getElementById('ollama-status-dot');
+  const label = document.getElementById('ollama-status-text');
+  if (!dot || !label) return;
+  dot.className = `status-dot status-${state}`;
+  label.textContent = text;
+}
+
+// ===== 校正実行 =====
+async function runProofread() {
+  const model = getActiveModel();
+
+  if (currentService === 'ollama') {
+    const url = getOllamaUrl();
+    if (!url) {
+      showError('Ollama のサーバー URL が設定されていません。設定欄に URL を入力して保存してください。');
+      return;
+    }
+    if (!model) {
+      showError('モデルが選択されていません。↻ ボタンでモデルを取得してください。');
+      return;
+    }
+  } else {
+    const apiKey = getActiveApiKey();
+    if (!apiKey || apiKey.length < 10) {
+      showError('API キーが設定されていません。設定欄に API キーを入力して保存してください。');
+      return;
+    }
+  }
+
+  const proofreadBtn = document.getElementById('proofread-btn');
+  const progressArea = document.getElementById('progress-area');
+  const resultsSection = document.getElementById('results-section');
 
   setLoading(true);
   hideError();
@@ -289,16 +455,18 @@ async function runProofread() {
     const docText = await getDocumentText();
     if (!docText || !docText.trim()) throw new Error('文書にテキストが見つかりませんでした。');
 
-    const serviceLabel = { openai: 'OpenAI', gemini: 'Gemini', claude: 'Claude' }[currentService];
+    const serviceLabel = { openai: 'OpenAI', gemini: 'Gemini', claude: 'Claude', ollama: 'Ollama' }[currentService];
     setProgress(`${serviceLabel} (${model}) で校正中... お待ちください`);
 
     let result = '';
     if (currentService === 'openai') {
-      result = await callOpenAIStream(apiKey, model, docText);
+      result = await callOpenAIStream(getActiveApiKey(), model, docText);
     } else if (currentService === 'gemini') {
-      result = await callGemini(apiKey, model, docText);
+      result = await callGemini(getActiveApiKey(), model, docText);
     } else if (currentService === 'claude') {
-      result = await callClaudeStream(apiKey, model, docText);
+      result = await callClaudeStream(getActiveApiKey(), model, docText);
+    } else if (currentService === 'ollama') {
+      result = await callOllamaStream(getOllamaUrl(), model, docText);
     }
 
     displayResults(result, docText, model);
@@ -307,7 +475,7 @@ async function runProofread() {
     showError(formatError(err, currentService));
   } finally {
     setLoading(false);
-    progressArea.style.display = 'none';
+    document.getElementById('progress-area').style.display = 'none';
   }
 }
 
@@ -368,11 +536,10 @@ async function callOpenAIStream(apiKey, model, docText) {
   return readSSEStream(res, chunk => chunk.choices?.[0]?.delta?.content || '');
 }
 
-// ===== Gemini: generateContent API =====
+// ===== Gemini: generateContent API (SSE) =====
 async function callGemini(apiKey, model, docText) {
   const userMsg = `${SYSTEM_PROMPT}\n\n以下の文書を校正してください。\n\n---\n${docText}\n---`;
 
-  // Gemini は 2.5 Flash を推奨。ストリーミングは streamGenerateContent を使用
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
 
   const requestBody = {
@@ -395,7 +562,6 @@ async function callGemini(apiKey, model, docText) {
   }
 
   return readSSEStream(res, chunk => {
-    // Gemini SSE レスポンス: candidates[0].content.parts[0].text
     return chunk.candidates?.[0]?.content?.parts?.[0]?.text || '';
   });
 }
@@ -428,13 +594,66 @@ async function callClaudeStream(apiKey, model, docText) {
     throw new Error('Claude API エラー: ' + (errData.error?.message || `HTTP ${res.status}`));
   }
 
-  // Claude SSE イベント: content_block_delta の delta.text
   return readSSEStream(res, chunk => {
     if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'text_delta') {
       return chunk.delta.text || '';
     }
     return '';
   });
+}
+
+// ===== Ollama: OpenAI 互换 Chat Completions API (stream) =====
+// クラウド依存なし。全処理はローカル Ollama サーバーで完結する。
+// Word アドインは HTTPS 配信のため、baseUrl は HTTPS URL（Caddy リバースプロキシ等）を使用すること。
+// 推奨: Caddy + ローカル CA 証明書で https://localhost:11435 を使用する。
+async function callOllamaStream(baseUrl, model, docText) {
+  const userMsg = `以下の文書を校正してください。\n\n---\n${docText}\n---`;
+
+  const requestBody = {
+    model,
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user',   content: userMsg },
+    ],
+    stream: true,
+    // Ollama は max_tokens を options.num_predict で渡すことも可能だが
+    // OpenAI 互換エンドポイントでは max_tokens が有効
+    max_tokens: 8192,
+    temperature: 0.2,
+  };
+
+  let res;
+  try {
+    res = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // Ollama は API キー不要だが Authorization ヘッダーを受け付ける
+        'Authorization': 'Bearer ollama',
+      },
+      body: JSON.stringify(requestBody),
+    });
+  } catch (networkErr) {
+    // fetch 自体が失敗した場合（CORS / Mixed Content / 接続拒否 など）
+    throw new Error(
+      'Ollama サーバーに接続できませんでした。\n\n' +
+      '考えられる原因:\n' +
+      '・ Ollama が起動していない\n' +
+      '・サーバー URL が間違っている（例: https://localhost:11435）\n' +
+      '・ HTTP URL を使用している（Word アドインは HTTPS が必要）\n' +
+      '　→ Caddy でリバースプロキシを設定し、caddy trust で CA 証明書を OS に登録してください\n' +
+      '・ Caddy の CA 証明書が OS に信頼登録されていない\n' +
+      '　→ Mac: キーチェーンアクセスで Caddy Local Authority を「常に信頼」に設定\n\n' +
+      '詳細: ' + networkErr.message
+    );
+  }
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error('Ollama API エラー: ' + (errData.error?.message || `HTTP ${res.status}`));
+  }
+
+  return readSSEStream(res, chunk => chunk.choices?.[0]?.delta?.content || '');
 }
 
 // ===== 共通 SSE ストリーム読み取り =====
@@ -478,8 +697,12 @@ async function readSSEStream(res, extractText) {
 // ===== 結果表示 =====
 function displayResults(rawText, docText, model) {
   const now = new Date().toLocaleString('ja-JP');
-  const svcLabel = { openai: 'OpenAI', gemini: 'Gemini', claude: 'Claude' }[currentService];
+  const svcLabel = { openai: 'OpenAI', gemini: 'Gemini', claude: 'Claude', ollama: 'Ollama (Local)' }[currentService];
   const badgeClass = `badge badge-${currentService}`;
+
+  const resultsMeta    = document.getElementById('results-meta');
+  const resultsContent = document.getElementById('results-content');
+  const resultsSection = document.getElementById('results-section');
 
   resultsMeta.innerHTML =
     `<span class="${badgeClass}">${svcLabel}</span>` +
@@ -510,6 +733,10 @@ function md2html(t) {
 // ===== エラーフォーマット =====
 function formatError(err, svc) {
   const m = err.message || '';
+  if (svc === 'ollama') {
+    // Ollama 固有のエラーはそのまま表示（callOllamaStream で詳細を付与済み）
+    return m || 'Ollama との通信中に不明なエラーが発生しました。';
+  }
   if (m.includes('401') || m.includes('invalid_api_key') || m.includes('API_KEY_INVALID')) {
     return `API キーが無効です。正しい ${svc === 'openai' ? 'OpenAI' : svc === 'gemini' ? 'Gemini' : 'Claude'} API キーを設定してください。`;
   }
@@ -526,10 +753,24 @@ function formatError(err, svc) {
 
 // ===== UI ヘルパー =====
 function setLoading(on) {
-  proofreadBtn.disabled    = on;
-  btnText.textContent      = on ? '校正中...' : '文書を校正する';
-  btnSpinner.style.display = on ? 'inline-block' : 'none';
+  const btn     = document.getElementById('proofread-btn');
+  const btnText = document.getElementById('btn-text');
+  const spinner = document.getElementById('btn-spinner');
+  if (btn)     btn.disabled          = on;
+  if (btnText) btnText.textContent   = on ? '校正中...' : '文書を校正する';
+  if (spinner) spinner.style.display = on ? 'inline-block' : 'none';
 }
-function setProgress(msg) { progressText.textContent = msg; }
-function showError(msg)    { errorMessage.textContent = msg; errorArea.style.display = 'block'; }
-function hideError()       { errorArea.style.display = 'none'; }
+function setProgress(msg) {
+  const el = document.getElementById('progress-text');
+  if (el) el.textContent = msg;
+}
+function showError(msg) {
+  const area = document.getElementById('error-area');
+  const msgEl = document.getElementById('error-message');
+  if (msgEl) msgEl.textContent = msg;
+  if (area)  area.style.display = 'block';
+}
+function hideError() {
+  const area = document.getElementById('error-area');
+  if (area) area.style.display = 'none';
+}

@@ -1,38 +1,72 @@
-# 文書校正アシスタント - manifest.xml 生成スクリプト（Windows 用）
+# ============================================================
+# 文書校正アシスタント（Caddy ローカルホスト版）
+# セットアップスクリプト（Windows 用）
+# ※ 管理者権限の PowerShell で実行してください
+# ============================================================
+
+$ScriptDir    = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ManifestSrc  = Join-Path $ScriptDir "manifest_local.xml"
+$SharedFolder = "$env:USERPROFILE\Documents\WordAddins"
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  文書校正アシスタント セットアップ" -ForegroundColor Cyan
+Write-Host "  （Caddy ローカルホスト版）" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "GitHub Pages の URL を入力してください。"
-Write-Host "例: https://yourusername.github.io/word-proofreader"
-Write-Host ""
-$PagesUrl = Read-Host "GitHub Pages URL"
-$PagesUrl = $PagesUrl.TrimEnd('/')
 
-if ([string]::IsNullOrWhiteSpace($PagesUrl)) {
-    Write-Host "エラー: URL が入力されていません。" -ForegroundColor Red
-    exit 1
+# ---- Step 1: office.js の確認 ----
+$OfficeJs = Join-Path $ScriptDir "office.js"
+if (-not (Test-Path $OfficeJs)) {
+    Write-Host "⚠️  office.js が見つかりません。" -ForegroundColor Yellow
+    $ans = Read-Host "今すぐダウンロードしますか？ [y/N]"
+    if ($ans -eq "y" -or $ans -eq "Y") {
+        & "$ScriptDir\fetch_office_js.ps1"
+    } else {
+        Write-Host "セットアップを中断しました。fetch_office_js.ps1 を実行してから再実行してください。"
+        exit 1
+    }
+} else {
+    Write-Host "✓ office.js を確認しました。" -ForegroundColor Green
 }
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+# ---- Step 2: Caddy のインストール確認 ----
+if (-not (Get-Command caddy -ErrorAction SilentlyContinue)) {
+    Write-Host ""
+    Write-Host "⚠️  Caddy がインストールされていません。" -ForegroundColor Yellow
+    Write-Host "   winget install Caddy.Caddy を実行してからこのスクリプトを再実行してください。"
+    exit 1
+} else {
+    $caddyVer = caddy version 2>&1 | Select-Object -First 1
+    Write-Host "✓ Caddy を確認しました（$caddyVer）" -ForegroundColor Green
+}
 
-# manifest.xml を生成
-$template = Get-Content "$ScriptDir\manifest_template.xml" -Raw -Encoding UTF8
-$manifest = $template -replace 'GITHUB_PAGES_URL', $PagesUrl
-$manifest | Out-File "$ScriptDir\manifest.xml" -Encoding UTF8
-
+# ---- Step 3: CA 証明書の登録 ----
 Write-Host ""
-Write-Host "✓ manifest.xml を生成しました。" -ForegroundColor Green
+Write-Host "Caddy のローカル CA 証明書を OS に登録します..." -ForegroundColor Cyan
+caddy trust
+Write-Host "✓ CA 証明書を登録しました。" -ForegroundColor Green
 
-# ネットワーク共有フォルダに配置（Word への登録方法）
-$SharedFolder = "$env:USERPROFILE\Documents\WordAddins"
+# ---- Step 4: manifest_local.xml を共有フォルダに配置 ----
 if (-not (Test-Path $SharedFolder)) {
     New-Item -ItemType Directory -Path $SharedFolder | Out-Null
 }
-Copy-Item "$ScriptDir\manifest.xml" "$SharedFolder\manifest.xml" -Force
+Copy-Item $ManifestSrc "$SharedFolder\manifest_local.xml" -Force
 
-Write-Host "✓ manifest.xml を $SharedFolder にコピーしました。" -ForegroundColor Green
+Write-Host ""
+Write-Host "✓ manifest_local.xml を $SharedFolder にコピーしました。" -ForegroundColor Green
+
+# ---- Step 5: Caddy サービス登録 ----
+Write-Host ""
+$ans = Read-Host "Caddy を Windows サービスとして登録しますか？（PC 起動時に自動起動） [y/N]"
+if ($ans -eq "y" -or $ans -eq "Y") {
+    caddy service install
+    caddy service start
+    Write-Host "✓ Caddy サービスを登録・起動しました。" -ForegroundColor Green
+} else {
+    Write-Host "手動起動する場合: caddy run --config `"$ScriptDir\Caddyfile`""
+}
+
+# ---- Step 6: Word への登録案内 ----
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  次の手順で Word に登録してください" -ForegroundColor Cyan
@@ -46,5 +80,5 @@ Write-Host "   $SharedFolder" -ForegroundColor Yellow
 Write-Host "4. 「メニューに表示する」にチェックを入れて OK"
 Write-Host "5. Word を再起動"
 Write-Host "6. 「挿入」→「アドイン」→「個人用アドイン」→「共有フォルダー」"
-Write-Host "   から「文書校正アシスタント」を選択"
+Write-Host "   から「文書校正アシスタント（ローカル）」を選択"
 Write-Host ""

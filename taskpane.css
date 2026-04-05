@@ -338,3 +338,65 @@ select:focus { border-color: #2c5f8a; }
 .badge-openai { background: #e8f4fd; color: #0d6efd; }
 .badge-gemini { background: #e8f8f0; color: #1a8a4a; }
 .badge-claude { background: #fdf0e8; color: #c05a00; }
+.badge-ollama { background: #f0f0ff; color: #5a00c0; }
+
+/* Ollama パネル */
+.ollama-notice {
+  background: #f8f4ff;
+  border: 1px solid #d0b8f0;
+  border-radius: 5px;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: #444;
+  line-height: 1.7;
+  margin-bottom: 8px;
+}
+.ollama-notice strong { color: #5a00c0; }
+.ollama-help-link {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #5a00c0;
+  text-decoration: none;
+  font-weight: bold;
+}
+.ollama-help-link:hover { text-decoration: underline; }
+.ollama-help-detail {
+  background: #f0f0ff;
+  border: 1px solid #c8b0e8;
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: #333;
+  line-height: 1.8;
+  margin-bottom: 8px;
+}
+.ollama-help-detail code {
+  background: #e8e0f8;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 11px;
+}
+.ollama-status-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-unknown  { background: #bbb; }
+.status-checking { background: #f0a500; animation: pulse 1s infinite; }
+.status-ok       { background: #27ae60; }
+.status-error    { background: #c0392b; }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+.status-text {
+  font-size: 11px;
+  color: #555;
+  flex: 1;
+}

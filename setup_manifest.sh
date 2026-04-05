@@ -1,48 +1,87 @@
 #!/bin/bash
-# 文書校正アシスタント - manifest.xml 生成スクリプト（Mac 用）
+# ============================================================
+# 文書校正アシスタント（Caddy ローカルホスト版）
+# セットアップスクリプト（Mac 用）
+# ============================================================
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MANIFEST_SRC="$SCRIPT_DIR/manifest_local.xml"
+ADDIN_DIR="${HOME}/Library/Containers/com.microsoft.Word/Data/Documents/wef"
 
 echo "========================================"
 echo "  文書校正アシスタント セットアップ"
+echo "  （Caddy ローカルホスト版）"
 echo "========================================"
 echo ""
-echo "GitHub Pages の URL を入力してください。"
-echo "例: https://yourusername.github.io/word-proofreader"
-echo ""
-read -p "GitHub Pages URL: " PAGES_URL
 
-# 末尾スラッシュを除去
-PAGES_URL="${PAGES_URL%/}"
-
-if [ -z "$PAGES_URL" ]; then
-  echo "エラー: URL が入力されていません。"
-  exit 1
+# ---- Step 1: office.js の確認 ----
+if [ ! -f "$SCRIPT_DIR/office.js" ]; then
+  echo "⚠️  office.js が見つかりません。"
+  echo "今すぐダウンロードしますか？ [y/N]"
+  read -r ans
+  if [ "$ans" = "y" ] || [ "$ans" = "Y" ]; then
+    chmod +x "$SCRIPT_DIR/fetch_office_js.sh"
+    "$SCRIPT_DIR/fetch_office_js.sh"
+  else
+    echo "セットアップを中断しました。office.js を取得してから再実行してください。"
+    exit 1
+  fi
+else
+  echo "✓ office.js を確認しました。"
 fi
 
-# manifest.xml を生成
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-sed "s|GITHUB_PAGES_URL|${PAGES_URL}|g" \
-    "${SCRIPT_DIR}/manifest_template.xml" \
-    > "${SCRIPT_DIR}/manifest.xml"
+# ---- Step 2: Caddy のインストール確認 ----
+if ! command -v caddy &>/dev/null; then
+  echo ""
+  echo "⚠️  Caddy がインストールされていません。"
+  echo "   brew install caddy を実行してからこのスクリプトを再実行してください。"
+  exit 1
+else
+  echo "✓ Caddy を確認しました（$(caddy version 2>&1 | head -1)）"
+fi
+
+# ---- Step 3: CA 証明書の登録 ----
+echo ""
+echo "Caddy のローカル CA 証明書を OS に登録します。"
+echo "管理者パスワードの入力を求められる場合があります。"
+echo ""
+caddy trust
 
 echo ""
-echo "✓ manifest.xml を生成しました。"
+echo "✓ CA 証明書を登録しました。"
 echo ""
-echo "次に、manifest.xml を Word に登録します..."
+echo "⚠️  Mac の場合、キーチェーンアクセスで追加の設定が必要です:"
+echo "   1. 「キーチェーンアクセス」を開く"
+echo "   2. 「システム」キーチェーンで「Caddy Local Authority」を探す"
+echo "   3. ダブルクリック →「信頼」→「常に信頼」に設定"
 echo ""
+read -p "キーチェーンの設定が完了したら Enter を押してください..."
 
-# Word アドインフォルダにコピー
-ADDIN_DIR="${HOME}/Library/Containers/com.microsoft.Word/Data/Documents/wef"
-mkdir -p "${ADDIN_DIR}"
-cp "${SCRIPT_DIR}/manifest.xml" "${ADDIN_DIR}/manifest.xml"
+# ---- Step 4: manifest.xml を Word に登録 ----
+mkdir -p "$ADDIN_DIR"
+cp "$MANIFEST_SRC" "$ADDIN_DIR/manifest_local.xml"
 
-echo "✓ manifest.xml を Word のアドインフォルダにコピーしました。"
-echo "  場所: ${ADDIN_DIR}/manifest.xml"
+echo ""
+echo "✓ manifest_local.xml を Word のアドインフォルダにコピーしました。"
+echo "  場所: $ADDIN_DIR/manifest_local.xml"
+
+# ---- Step 5: Caddy の起動案内 ----
 echo ""
 echo "========================================"
 echo "  セットアップ完了！"
 echo "========================================"
 echo ""
-echo "Word を起動（または再起動）し、"
+echo "Caddy を起動してください:"
+echo "  cd \"$SCRIPT_DIR\""
+echo "  caddy run --config Caddyfile"
+echo ""
+echo "PC 起動時に自動起動する場合:"
+echo "  brew services start caddy"
+echo "  ※ Caddyfile のパスを絶対パスに変更してから実行してください"
+echo ""
+echo "Caddy 起動後、Word を再起動して"
 echo "「挿入」→「アドイン」→「個人用アドイン」から"
-echo "「文書校正アシスタント」を選択してください。"
+echo "「文書校正アシスタント（ローカル）」を選択してください。"
 echo ""

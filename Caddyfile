@@ -1,0 +1,43 @@
+# ============================================================
+# 文書校正アシスタント - Caddy ローカルホスト構成
+# ============================================================
+#
+# ポート構成:
+#   11436 ... アドイン UI（taskpane.html 等）を配信
+#   11435 ... Ollama へのリバースプロキシ（HTTPS → HTTP）
+#
+# 初回セットアップ:
+#   1. caddy trust   （CA 証明書を OS に登録。管理者権限が必要）
+#      Mac: キーチェーンアクセスで「Caddy Local Authority」を「常に信頼」に設定
+#   2. office.js を取得:
+#      Mac/Linux: ./fetch_office_js.sh
+#      Windows:   .\fetch_office_js.ps1
+#   3. caddy run --config Caddyfile
+#
+# 自動起動:
+#   Mac:     brew services start caddy
+#   Windows: caddy service install  &&  caddy service start
+# ============================================================
+
+# ---- アドイン UI サーバー（ポート 11436）----
+localhost:11436 {
+    # アドインファイルを配信するルートディレクトリ
+    # このファイルと同じフォルダを指定する
+    root * {$ADDIN_ROOT:.}
+    file_server
+
+    # CORS ヘッダー（Word の WebView から読み込めるようにする）
+    header Access-Control-Allow-Origin "*"
+    header Access-Control-Allow-Methods "GET, OPTIONS"
+}
+
+# ---- Ollama リバースプロキシ（ポート 11435）----
+localhost:11435 {
+    # Ollama のデフォルトポート 11434 に転送
+    reverse_proxy localhost:11434
+
+    # CORS ヘッダー（アドインから fetch できるようにする）
+    header Access-Control-Allow-Origin "https://localhost:11436"
+    header Access-Control-Allow-Methods "GET, POST, OPTIONS"
+    header Access-Control-Allow-Headers "Content-Type, Authorization"
+}
