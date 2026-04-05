@@ -42,12 +42,24 @@ else
   echo "✓ Caddy を確認しました（$(caddy version 2>&1 | head -1)）"
 fi
 
-# ---- Step 3: CA 証明書の登録 ----
+# ---- Step 3: Caddy をバックグラウンドで起動して CA 証明書を登録 ----
+# caddy trust は Caddy の管理 API（port 2019）に接続するため、
+# 先に caddy start でバックグラウンド起動が必要。
 echo ""
-echo "Caddy のローカル CA 証明書を OS に登録します。"
+echo "Caddy を一時起動して CA 証明書を OS に登録します..."
 echo "管理者パスワードの入力を求められる場合があります。"
 echo ""
-caddy trust
+
+# 既存の Caddy プロセスがあれば停止
+caddy stop 2>/dev/null || true
+
+# Caddyfile のあるフォルダで起動
+cd "$SCRIPT_DIR"
+caddy start --config Caddyfile
+sleep 2  # 起動待ち
+
+# CA 証明書を OS のキーチェーンに登録
+sudo caddy trust
 
 echo ""
 echo "✓ CA 証明書を登録しました。"
@@ -67,7 +79,8 @@ echo ""
 echo "✓ manifest_local.xml を Word のアドインフォルダにコピーしました。"
 echo "  場所: $ADDIN_DIR/manifest_local.xml"
 
-# ---- Step 5: Caddy の起動案内 ----
+# ---- Step 5: Caddy を再起動して通常運用モードへ ----
+caddy stop 2>/dev/null || true
 echo ""
 echo "========================================"
 echo "  セットアップ完了！"
@@ -79,7 +92,8 @@ echo "  caddy run --config Caddyfile"
 echo ""
 echo "PC 起動時に自動起動する場合:"
 echo "  brew services start caddy"
-echo "  ※ Caddyfile のパスを絶対パスに変更してから実行してください"
+echo "  ※ Caddyfile の root ディレクティブを絶対パスに変更してから実行してください"
+echo "  例: root * $SCRIPT_DIR"
 echo ""
 echo "Caddy 起動後、Word を再起動して"
 echo "「挿入」→「アドイン」→「個人用アドイン」から"

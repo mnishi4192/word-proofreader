@@ -40,10 +40,24 @@ if (-not (Get-Command caddy -ErrorAction SilentlyContinue)) {
     Write-Host "✓ Caddy を確認しました（$caddyVer）" -ForegroundColor Green
 }
 
-# ---- Step 3: CA 証明書の登録 ----
+# ---- Step 3: Caddy を一時起動して CA 証明書を登録 ----
+# caddy trust は Caddy の管理 API（port 2019）に接続するため、
+# 先に caddy start でバックグラウンド起動が必要。
 Write-Host ""
-Write-Host "Caddy のローカル CA 証明書を OS に登録します..." -ForegroundColor Cyan
+Write-Host "Caddy を一時起動して CA 証明書を OS に登録します..." -ForegroundColor Cyan
+
+# 既存の Caddy プロセスを停止（エラーは無視）
+caddy stop 2>$null
+
+# Caddyfile のあるフォルダでバックグラウンド起動
+Push-Location $ScriptDir
+caddy start --config Caddyfile
+Start-Sleep -Seconds 2  # 起動待ち
+
+# CA 証明書を OS の証明書ストアに登録
 caddy trust
+Pop-Location
+
 Write-Host "✓ CA 証明書を登録しました。" -ForegroundColor Green
 
 # ---- Step 4: manifest_local.xml を共有フォルダに配置 ----
